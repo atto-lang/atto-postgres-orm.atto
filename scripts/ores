@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+compiler="${ORESLANG_SOURCE_DIR:-$root/../oreslang-source.java}"
+java_bin="${ORES_JAVA:-/opt/homebrew/opt/openjdk@25/bin/java}"
+if [[ ! -x "$java_bin" ]]; then java_bin=java; fi
+expected="$(cat "$root/SOURCE_REF")"
+[[ "$(git -C "$compiler" rev-parse HEAD)" == "$expected" ]] || { echo 'Compiler revision mismatch' >&2; exit 69; }
+[[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] || { echo 'Compiler has tracked modifications' >&2; exit 69; }
+cpfile="$compiler/target/classpath.txt"
+[[ -f "$cpfile" ]] || cpfile="$compiler/target/no-zalgo-classpath.txt"
+exec "$java_bin" --enable-native-access=ALL-UNNAMED -Dpolyglot.engine.WarnInterpreterOnly=false -cp "$compiler/target/classes:$(cat "$cpfile")" dev.oreslang.launcher.OresMain "$@"
