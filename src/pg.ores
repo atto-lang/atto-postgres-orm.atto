@@ -1,0 +1,41 @@
+// Native SQL planning layer. A transport adapter must bind params separately.
+pub define class Query as
+  pub val string sql;
+  pub val Array<string> params;
+  pub constructor(string sql, Array<string> params) {
+    self.sql = sql;
+    self.params = params;
+  }
+end
+
+define module pg as
+  pub fnc ident(string name): string {
+    return "\"" + name.replace_literal("\"", "\"\"") + "\"";
+  }
+  pub fnc column(string name, string kind, bool nullable): Result<string, string> {
+    if kind != "uuid" && kind != "text" && kind != "integer" && kind != "bigint"
+      && kind != "boolean" && kind != "jsonb" && kind != "timestamptz" && kind != "bytea" then
+      return Err("unsupported PostgreSQL type");
+    fi
+    let string sql = ident(name) + " " + kind;
+    if !nullable then sql = sql + " NOT NULL"; fi
+    return Ok(sql);
+  }
+  pub fnc table(string name, Array<string> columns, Array<string> trusted_constraints): string {
+    let string sql = "CREATE TABLE " + ident(name) + " (";
+    let bool first = true;
+    for (val column of columns) {
+      if !first then sql = sql + ","; fi
+      sql = sql + "\n  " + column;
+      first = false;
+    }
+    for (val constraint of trusted_constraints) {
+      sql = sql + ",\n  " + constraint;
+    }
+    return sql + "\n);\n";
+  }
+  pub fnc find_in_workspace(string table, string workspace, string id): Query {
+    return new Query("SELECT * FROM " + ident(table)
+      + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]);
+  }
+end

@@ -1,0 +1,12 @@
+import module pg from '../src/pg';
+pub routine main(): void {
+  if pg.ident("x\";DROP TABLE runs;--") != "\"x\"\";DROP TABLE runs;--\"" then panic("identifier escape"); fi
+  if !pg.column("x", "text; DROP TABLE runs", false).is_err() then panic("type injection"); fi
+  if pg.column("optional", "jsonb", true).unwrap() != "\"optional\" jsonb" then panic("nullable column"); fi
+  if pg.column("required", "uuid", false).unwrap() != "\"required\" uuid NOT NULL" then panic("required column"); fi
+  val query = pg.find_in_workspace("runs", "hostile' OR true--", "id");
+  if query.params.get(0) != "hostile' OR true--" then panic("bound params"); fi
+  if query.sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query SQL"); fi
+  stdio.println("Postgres SQL planning contracts passed");
+  return;
+}
