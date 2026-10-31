@@ -25,9 +25,9 @@ define module pg as
   // NUL and PostgreSQL's UTF-8 identifier byte limit before execution.
   pub fnc invalid_identifier_surface(string name): bool {
     return name == ""
-      || name.replace_literal("\\n", "") != name
-      || name.replace_literal("\\r", "") != name
-      || name.replace_literal("\\t", "") != name;
+      || name.replace_literal("\n", "") != name
+      || name.replace_literal("\r", "") != name
+      || name.replace_literal("\t", "") != name;
   }
   pub fnc ident(string name): string {
     // Legacy string API panics on bad surface; typed builders return Err.
