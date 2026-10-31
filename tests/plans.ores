@@ -17,6 +17,31 @@ pub routine main(): void {
   if hostile_table.sql != "SELECT * FROM \"runs\"\" JOIN secret ON true --\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query table quoting"); fi
   if hostile_table.params.get(0) != "w" then panic("workspace bind/SQL separation"); fi
   if hostile_table.params.get(1) != "i" then panic("id bind/SQL separation"); fi
+  val typed = pg.table_typed_pk("workflows", arr[
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("payload", "jsonb", true)
+  ], arr["workspace_id", "id"]);
+  if typed.is_err() then panic("typed DDL rejected admitted schema"); fi
+  if typed.unwrap() != "CREATE TABLE \"workflows\" (\\n  \"workspace_id\" uuid NOT NULL,\\n  \"id\" uuid NOT NULL,\\n  \"payload\" jsonb,\\n  PRIMARY KEY (\"workspace_id\", \"id\")\\n);\\n" then panic("typed DDL canonical SQL"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "text); DROP TABLE runs;--", false)
+  ], arr["id"]).is_err() then panic("typed DDL type injection"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["missing"]).is_err() then panic("undeclared primary-key column"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", false), pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_err() then panic("duplicate typed columns"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id", "id"]).is_err() then panic("duplicate primary-key columns"); fi
+  if !pg.table_typed_pk("", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_err() then panic("empty table admitted"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("", "uuid", false)
+  ], arr[""]).is_err() then panic("empty typed column admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
