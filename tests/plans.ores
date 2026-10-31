@@ -304,7 +304,7 @@ pub routine main(): void {
     panic("empty non-NULL text parameter rejected");
   fi
   // Caller mutation must not alter a previously planned immutable snapshot.
-  let Array<DbValue> mutable_typed_binds = arr[
+  val mutable_typed_binds = arr[
     pg.checked_db_value("uuid", "original-workspace", false).unwrap(),
     pg.checked_db_value("uuid", "original-record", false).unwrap()
   ];
