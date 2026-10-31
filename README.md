@@ -21,7 +21,7 @@ val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
 For tables with a primary key, prefer `table_typed_pk` over raw column and
 constraint fragments. `column_spec` carries names/types/nullability as data;
 the builder checks the type allowlist, nonempty column/table/key names, duplicate
-columns and primary-key entries, and primary-key references to declared columns.
+columns and primary-key entries, nullable primary-key columns, and primary-key\nreferences to declared columns.
 It returns `Result<string,string>` rather than silently accepting those errors.
 
 ```ores
