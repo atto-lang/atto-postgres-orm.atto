@@ -22,7 +22,8 @@ actual="$(git -C "$compiler" rev-parse HEAD 2>/dev/null)" || fail 'compiler HEAD
 [[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] || fail 'Compiler has tracked modifications'
 [[ -z "$(git -C "$compiler" ls-files --others -- src pom.xml .mvn)" ]] || fail 'Compiler has untracked or ignored build inputs'
 cpfile="$compiler/target/classpath.txt"
-if [[ ! -s "$cpfile" ]]; then cpfile="$compiler/target/no-zalgo-classpath.txt"; fi
-[[ -s "$cpfile" ]] || fail 'Generated runtime classpath missing or empty'
-[[ -f "$compiler/target/classes/dev/oreslang/launcher/OresMain.class" ]] || fail 'Compiled OresMain.class missing'
+# Never substitute an alternate or stale classpath for the Maven output.
+[[ -s "$cpfile" && ! -L "$cpfile" ]] || fail 'Generated runtime classpath missing, empty, or a symlink'
+launcher_class="$compiler/target/classes/dev/oreslang/launcher/OresMain.class"
+[[ -f "$launcher_class" && ! -L "$launcher_class" ]] || fail 'Compiled OresMain.class missing or a symlink'
 exec "$java_bin" --enable-native-access=ALL-UNNAMED -Dpolyglot.engine.WarnInterpreterOnly=false -cp "$compiler/target/classes:$(cat "$cpfile")" dev.oreslang.launcher.OresMain "$@"
