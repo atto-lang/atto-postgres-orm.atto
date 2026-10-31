@@ -107,6 +107,17 @@ or silently missing negative fixtures.
 
 The positive guest checks quoting of hostile table names, the type allowlist,
 nullable columns, parameter/SQL separation and the exact generated DDL text.
+It now also contains an **unexecuted** typed UNIQUE/FOREIGN KEY SQL golden and
+negative fixtures for duplicate constraints/columns, missing local columns,
+empty UNIQUE, mismatched FK arity, an injected remote table and qualified
+referenced column. This is a bounded subset of DDL, not arbitrary CHECK
+expressions or source-authored constraint SQL.
+
+The new constrained-table builder limits column count (64), PK arity (32),
+extra constraints (32) and local columns per constraint (32). It relies on
+the same conservatively admitted ASCII identifier path. A real PostgreSQL
+17 parse/execute test is required before claiming valid DDL or foreign-key
+behavior; the host reference golden cannot establish database validity.
 The negative guests establish fail-closed planning behavior only. Neither
 positive nor negative planner tests prove SQL execution or tenant isolation.
 
