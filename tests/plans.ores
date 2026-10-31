@@ -86,6 +86,28 @@ pub routine main(): void {
   if pg.admitted_identifier("runs\"; --") then panic("quote identifier admitted"); fi
   if pg.admitted_identifier("schema.runs") then panic("qualified identifier admitted"); fi
   if pg.admitted_identifier("é") then panic("unicode identifier admitted"); fi
+  // Non-ASCII identifiers must fail even if a backend's is_identifier accepts
+  // Unicode letters, marks, joiners or width-variant confusables.
+  for (val non_ascii of arr["é", "élan", "aé", "éa", "a\u0301", "\uFF41", "a\u200d", "a\u00a0", "a\u03bf"]) {
+    if pg.admitted_identifier(non_ascii) then panic("unmapped Unicode admitted"); fi
+    if !pg.table_typed_pk(non_ascii, arr[
+      pg.column_spec("id", "uuid", false)
+    ], arr["id"]).is_err() then panic("Unicode typed table admitted"); fi
+    if !pg.find_in_workspace_plan_checked(non_ascii, "w", "i").is_err() then
+      panic("Unicode checked plan table admitted"); fi
+    if !pg.find_in_workspace_checked(non_ascii, "w", "i").is_err() then
+      panic("Unicode checked legacy table admitted"); fi
+  }
+  if pg.admitted_identifier("ab|cd") then panic("ASCII count sentinel admitted"); fi
+  if !pg.table_typed_pk("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("aé", "text", false)
+  ], arr["id"]).is_err() then panic("Unicode typed column admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "w\u03bfrkspaces", arr["id"])
+  ]).is_err() then panic("Unicode FK target admitted"); fi
   if pg.admitted_identifier("\u0000") then panic("NUL identifier admitted"); fi
   if pg.admitted_identifier("line\nbreak") then panic("LF identifier admitted"); fi
   if pg.admitted_identifier("line\rbreak") then panic("CR identifier admitted"); fi

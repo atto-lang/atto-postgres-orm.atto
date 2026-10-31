@@ -116,11 +116,17 @@ define module pg as
   // The pinned compiler exposes no string byte-length API; map admitted
   // characters to a delimiter then count split components.
   pub fnc admitted_identifier(string name): bool {
+    // The count sentinel must never originate from the untrusted input.
+    if name == "" || name.replace_literal("|", "") != name then return false; fi
     if !name.is_identifier() then return false; fi
     let string mapped = name;
     for (val letter of arr["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"]) {
       mapped = mapped.replace_literal(letter, "|");
     }
+    // is_identifier is a syntax predicate, NOT a proof of ASCII membership.
+    // Any unmapped Unicode, control or punctuation must fail closed before
+    // the delimiter count is used as the 63-byte limit.
+    if mapped.replace_literal("|", "") != "" then return false; fi
     return mapped.split_literal("|").size <= 64;
   }
   pub fnc column_spec(string name, string kind, bool nullable): ColumnSpec {
