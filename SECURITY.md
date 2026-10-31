@@ -6,7 +6,7 @@ a scope and release-gating contract, not certification.
 ## Trust boundaries
 
 1. `pg.ident` escapes embedded double quotes and rejects empty names (in
-   the prerequisite hardening branch), but does **not** validate NUL, control
+   the prerequisite hardening branch), and rejects LF/CR/TAB surfaces, but does **not** validate NUL, other C0
    characters, PostgreSQL's identifier byte limit, schema-qualified component
    boundaries, or normalization/truncation collisions. Identifier validation
    must occur before any privileged execution. Quoted text is not an
