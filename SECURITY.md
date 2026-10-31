@@ -57,6 +57,25 @@ a scope and release-gating contract, not certification.
    transaction/cancellation implementation, row stream, or migrations API is
    implemented here. Never infer those capabilities from generated SQL.
 
+## Native launcher admission
+
+`scripts/ores` refuses missing explicit `ORES_JAVA`, a non-JDK25 runtime,
+a mismatched `SOURCE_REF`, dirty or untracked/ignored compiler build inputs,
+and absent Maven classpath or `OresMain.class`. It does not fall back
+silently from a supplied Java binary. The self-tests
+`tests/verify-launcher-host.bash` simulate successful and failing launcher
+admissions using dummy files and fake Java executables; **8/8 passed locally**
+against verified exact Git blob identities. This is only host admission
+proof, not a successful private compiler build or guest execution.
+
+Cross-organization private-source mirror testing is permitted by this
+task's explicit user request, but **none of the checked private
+candidate organizations has demonstrated runner admission**. Do not
+replicate the private ORM/compiler source merely to accumulate
+non-executing jobs; keep source local to the owner until an authorized
+private runner is confirmed. No source has been copied cross-org in
+this task.
+
 ## Release-blocking negative oracles
 
 - Typed-identifier: ASCII 63/64-byte boundary, quotes, NUL, C0 controls,
