@@ -117,7 +117,8 @@ The new constrained-table builder limits column count (64), PK arity (32),
 extra constraints (32) and local columns per constraint (32).
 The new renderer emits complete DDL directly; additional positive fixtures
 assert unchanged PK-only SQL, ordered distinct UNIQUE/FK clauses, exact
-duplicate comparisons and copying of caller-owned constraint arrays.
+duplicate comparisons, copied caller-owned constraint arrays and
+fresh-copy read accessors that cannot mutate the stored identifiers.
 The `QueryPlan` fixtures test copied bound strings, mutation of legacy
 source arrays after snapshot creation and parameter index bounds. These
 new assertions are **authored, not executed by the native compiler**. It relies on
