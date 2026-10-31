@@ -132,7 +132,7 @@ golden authored in `tests/plans.ores`; its PostgreSQL script uses a generated
 simple-ASCII schema inside `BEGIN` / `ROLLBACK` and fails unless the schema
 is absent afterward. It checks UNIQUE, FK, NOT NULL and composite PK rejects
 with distinct PostgreSQL exception categories. An explicitly disposable database
-and `PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE` are mandatory. The SQL-only gate also reads the server's `server_version_num` and fails unless the backend identifies as PostgreSQL 17; a client-version string is insufficient.
+and `PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE` are mandatory. The SQL-only gate also reads the server's `server_version_num` and fails unless the backend identifies as PostgreSQL 17; a client-version string is insufficient. The DDL SQL checks `server_version_num` again inside its transaction, preventing a routed preflight connection from certifying a different backend used by the actual DDL.
 
 The CI `pg17-ddl-integration.yml` declares a disposable PostgreSQL 17
 service, **but a declared CI job is not an executed job**. The separate mock
