@@ -3,6 +3,11 @@ on:
   pull_request:
     paths:
       - '.github/workflows/runner-admission-canary.yml'
+  push:
+    branches:
+      - 'hardening/sql-planner-boundaries-20261030'
+    paths:
+      - '.github/workflows/runner-admission-canary.yml'
   workflow_dispatch:
 permissions: {}
 jobs:
