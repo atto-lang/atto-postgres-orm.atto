@@ -51,7 +51,9 @@ fn inspect(
     if !digest(commit, 40) || !digest(tree, 40) || !digest(corpus, 64) {
         return Err("expected pins must be nonzero lowercase full digests".into());
     }
-    if text.len() as u64 > LIMIT || !text.is_ascii() || text.contains('\r') {
+    if text.len() as u64 > LIMIT || !text.is_ascii() || text.contains('\r')
+        || !text.ends_with('\n')
+    {
         return Err("receipt must be bounded canonical ASCII/LF TSV".into());
     }
     let expected = manifest(cases)?;
@@ -256,6 +258,12 @@ mod tests {
         ] {
             assert!(check(&text, CASES).is_err());
         }
+    }
+    #[test]
+    fn final_lf_is_required_for_canonical_tsv() {
+        let valid = receipt(CASES);
+        assert!(check(&valid, CASES).is_ok());
+        assert!(check(valid.trim_end_matches('\n'), CASES).is_err());
     }
     #[test]
     fn header_and_column_count_are_strict() {
