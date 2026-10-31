@@ -66,8 +66,9 @@ a mismatched `SOURCE_REF`, dirty or untracked/ignored compiler build inputs,
 and absent Maven classpath or `OresMain.class`. It does not fall back
 silently from a supplied Java binary. The self-tests
 `tests/verify-launcher-host.bash` simulate successful and failing launcher
-admissions using dummy files and fake Java executables; **8/8 passed locally**
-against verified exact Git blob identities. This is only host admission
+admissions using dummy files and fake Java executables; **11/11 passed locally**
+against verified Git blobs. The launcher rejects stale alternate classpaths
+and symlinked runtime artifacts, not only absent classpath/class files. This is only host admission
 proof, not a successful private compiler build or guest execution.
 
 Cross-organization private-source mirror testing is permitted by this
@@ -137,8 +138,8 @@ and `PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE` are mandatory. The SQ
 The CI `pg17-ddl-integration.yml` declares a disposable PostgreSQL 17
 service, **but a declared CI job is not an executed job**. The separate mock
 suite `verify-pg17-ddl-host.bash` runs without PostgreSQL and checks
-negative preflight, altered-output, and server-major checks; **9/9 cases
-passed locally** with exact matching GitHub shell-script blobs, including
+negative preflight, altered-output, fixture-drift-before-connection,
+and server-major checks; **10/10 cases passed locally** with exact matching GitHub shell-script blobs, including
 rejection of PostgreSQL 16/18 or missing/malformed version inspection. This does not prove that Oreslang
 emits the SQL, that database access is authorized, that RLS is enforced, or
 that a PostgreSQL driver/actor connection exists. Do not promote the ORM
