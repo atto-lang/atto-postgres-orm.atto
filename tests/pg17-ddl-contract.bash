@@ -4,15 +4,15 @@
 set -euo pipefail
 
 fail() { printf 'PG_DDL_CONTRACT_NOT_VERIFIED: %s\n' "$*" >&2; exit 1; }
-[[ "\${PG_TEST_DISPOSABLE:-}" == 'I_ACKNOWLEDGE_DISPOSABLE_DATABASE' ]] ||
+[[ "${PG_TEST_DISPOSABLE:-}" == 'I_ACKNOWLEDGE_DISPOSABLE_DATABASE' ]] ||
   fail 'explicit PG_TEST_DISPOSABLE opt-in required'
-[[ -n "\${PG_TEST_DSN:-}" ]] || fail 'PG_TEST_DSN must point to an isolated disposable test database'
+[[ -n "${PG_TEST_DSN:-}" ]] || fail 'PG_TEST_DSN must point to an isolated disposable test database'
 command -v psql >/dev/null 2>&1 || fail 'psql unavailable'
 
 # Require a recognizable fixture golden before making any database connection.
 # The SQL below is an independent PostgreSQL execution fixture, not emitted by
 # the Oreslang compiler. If the planner fixture changes, stop for human review.
-root="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 fixture="$root/tests/plans.ores"
 [[ -f "$fixture" ]] || fail 'native plan fixture missing'
 expected='CREATE TABLE \"docs\" (\n  \"workspace_id\" uuid NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"external_id\" text NOT NULL,\n  PRIMARY KEY (\"workspace_id\", \"id\"),\n  UNIQUE (\"workspace_id\", \"external_id\"),\n  FOREIGN KEY (\"workspace_id\") REFERENCES \"workspaces\" (\"id\")\n);\n'
@@ -21,7 +21,7 @@ grep -Fq -- "$expected" "$fixture" || fail 'authored Oreslang DDL golden has dri
 # A new, random, bounded simple-ASCII schema name per invocation. All changes
 # remain inside a transaction that ends with ROLLBACK; an error disconnects and
 # automatically rolls the transaction back. No existing schema is touched.
-schema="ores_pg_contract_\${RANDOM}_\${RANDOM}_$$"
+schema="ores_pg_contract_${RANDOM}_${RANDOM}_$$"
 [[ "$schema" =~ ^[a-z0-9_]{1,63}$ ]] || fail 'invalid ephemeral schema name'
 result="$({ psql -X -q -A -t -v ON_ERROR_STOP=1 -v "contract_schema=$schema" "$PG_TEST_DSN" <<'SQL'
 BEGIN;
