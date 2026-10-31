@@ -64,14 +64,20 @@ pub routine main(): void {
   if !pg.admitted_identifier("select") then panic("reserved word safe when quoted"); fi
   if !pg.admitted_identifier("_Mixed09") then panic("safe mixed case identifier"); fi
   if !pg.admitted_identifier("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then panic("63-byte identifier rejected"); fi
+  if pg.table_typed_pk("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_err() then panic("63-byte typed table rejected"); fi
+  if pg.table_typed_pk("runs", arr[
+    pg.column_spec("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "uuid", false)
+  ], arr["aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"]).is_err() then panic("63-byte typed column rejected"); fi
   if pg.admitted_identifier("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then panic("64-byte identifier admitted"); fi
-  if pg.admitted_identifier("runs\\\"; --") then panic("quote identifier admitted"); fi
+  if pg.admitted_identifier("runs\"; --") then panic("quote identifier admitted"); fi
   if pg.admitted_identifier("schema.runs") then panic("qualified identifier admitted"); fi
   if pg.admitted_identifier("é") then panic("unicode identifier admitted"); fi
-  if pg.admitted_identifier("\\u0000") then panic("NUL identifier admitted"); fi
-  if pg.admitted_identifier("line\\nbreak") then panic("LF identifier admitted"); fi
-  if pg.admitted_identifier("line\\rbreak") then panic("CR identifier admitted"); fi
-  if pg.admitted_identifier("line\\tbreak") then panic("TAB identifier admitted"); fi
+  if pg.admitted_identifier("\u0000") then panic("NUL identifier admitted"); fi
+  if pg.admitted_identifier("line\nbreak") then panic("LF identifier admitted"); fi
+  if pg.admitted_identifier("line\rbreak") then panic("CR identifier admitted"); fi
+  if pg.admitted_identifier("line\tbreak") then panic("TAB identifier admitted"); fi
   if !pg.table_typed_pk("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", arr[
     pg.column_spec("id", "uuid", false)
   ], arr["id"]).is_err() then panic("long typed table admitted"); fi
@@ -81,12 +87,12 @@ pub routine main(): void {
   if !pg.table_typed_pk("runs", arr[
     pg.column_spec("id", "uuid", false)
   ], arr["schema.id"]).is_err() then panic("qualified typed key admitted"); fi
-  if !pg.table_typed_pk("runs\\\"; --", arr[
+  if !pg.table_typed_pk("runs\"; --", arr[
     pg.column_spec("id", "uuid", false)
   ], arr["id"]).is_err() then panic("quoted typed table admitted"); fi
   if !pg.table_typed_pk("runs", arr[
-    pg.column_spec("id\\\"", "uuid", false)
-  ], arr["id\\\""]).is_err() then panic("quoted typed column admitted"); fi
+    pg.column_spec("id\"", "uuid", false)
+  ], arr["id\""]).is_err() then panic("quoted typed column admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
