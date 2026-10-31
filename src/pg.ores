@@ -8,6 +8,18 @@ pub define class Query as
   }
 end
 
+// Data-only inputs for the checked primary-key table builder. Never store SQL here.
+pub define class ColumnSpec as
+  pub val string name;
+  pub val string kind;
+  pub val bool nullable;
+  pub constructor(string name, string kind, bool nullable) {
+    self.name = name;
+    self.kind = kind;
+    self.nullable = nullable;
+  }
+end
+
 define module pg as
   pub fnc ident(string name): string {
     // An empty PostgreSQL identifier is not a valid table or column name.
@@ -25,6 +37,55 @@ define module pg as
     if !nullable then sql = sql + " NOT NULL"; fi
     return Ok(sql);
   }
+  // Factory keeps callers independent of ColumnSpec module-export conventions.
+  pub fnc column_spec(string name, string kind, bool nullable): ColumnSpec {
+    return new ColumnSpec(name, kind, nullable);
+  }
+  // A limited typed DDL path: only allowlisted column types and PRIMARY KEY.
+  // This is SQL planning, NOT a driver, identifier-admission or RLS boundary.
+  pub fnc table_typed_pk(string name, Array<ColumnSpec> columns, Array<string> key_columns): Result<string, string> {
+    if name == "" then return Err("empty PostgreSQL table identifier"); fi
+    let string sql = "CREATE TABLE " + ident(name) + " (";
+    let bool first = true;
+    for (val spec of columns) {
+      val rendered = column(spec.name, spec.kind, spec.nullable);
+      if rendered.is_err() then return Err("invalid PostgreSQL column definition"); fi
+      let bool seen = false;
+      for (val other of columns) {
+        if other.name == spec.name then
+          if seen then return Err("duplicate PostgreSQL column identifier"); fi
+          seen = true;
+        fi
+      }
+      if !first then sql = sql + ","; fi
+      sql = sql + "\n  " + rendered.unwrap();
+      first = false;
+    }
+    if first then return Err("PostgreSQL table requires at least one column"); fi
+    let bool first_key = true;
+    let string keys = "PRIMARY KEY (";
+    for (val key of key_columns) {
+      if key == "" then return Err("empty PostgreSQL primary-key identifier"); fi
+      let bool found = false;
+      for (val spec of columns) {
+        if spec.name == key then found = true; fi
+      }
+      if !found then return Err("primary-key column is not declared"); fi
+      let bool seen = false;
+      for (val other_key of key_columns) {
+        if other_key == key then
+          if seen then return Err("duplicate primary-key identifier"); fi
+          seen = true;
+        fi
+      }
+      if !first_key then keys = keys + ", "; fi
+      keys = keys + ident(key);
+      first_key = false;
+    }
+    if first_key then return Err("PostgreSQL primary key requires at least one column"); fi
+    return Ok(sql + ",\n  " + keys + ")\n);\n");
+  }
+  // Legacy trusted-SQL escape hatch: never admit user-supplied SQL fragments.
   pub fnc table(string name, Array<string> columns, Array<string> trusted_constraints): string {
     let string sql = "CREATE TABLE " + ident(name) + " (";
     let bool first = true;
