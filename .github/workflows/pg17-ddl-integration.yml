@@ -5,6 +5,7 @@ on:
       - 'src/pg.ores'
       - 'tests/plans.ores'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/pg17-prepared-binds.bash'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg17-ddl-integration.yml'
   workflow_dispatch:
@@ -47,4 +48,6 @@ jobs:
           set -euo pipefail
           bash -n tests/pg17-ddl-contract.bash
           bash tests/pg17-ddl-contract.bash
+          bash -n tests/pg17-prepared-binds.bash
+          bash tests/pg17-prepared-binds.bash
           printf '%s\n' 'SQL_ONLY_DB_GATE_COMPLETE: Does not compile Oreslang or verify RLS/driver/backend parity'
