@@ -7,11 +7,11 @@ queries.** A native DB capability/driver remains required.
 
 ```ores
 import module pg from './src/pg';
-val sql = pg.table_typed_pk("workflows", arr[
+val ddl = pg.table_typed_pk("workflows", arr[
   pg.column_spec("workspace_id", "uuid", false),
   pg.column_spec("id", "uuid", false),
   pg.column_spec("name", "text", false)
-], arr["workspace_id", "id"]);
+], arr["workspace_id", "id"]).unwrap();
 val query = pg.find_in_workspace_checked("workflows", workspace_id, workflow_id).unwrap();
 // Adapter executes query.sql and binds query.params separately.
 ```
