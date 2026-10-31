@@ -7,7 +7,7 @@ a scope and release-gating contract, not certification.
 
 1. `pg.admitted_identifier` is a narrow safe input policy for typed DDL:
    ASCII `[A-Za-z_][A-Za-z0-9_]*`, 1..63 bytes, counted through
-   `split_literal` after mapping the known ASCII alphabet to a delimiter.
+   `split_literal(...).size` after mapping the known ASCII alphabet to a delimiter.
    Non-ASCII, quotes, NUL/C0 controls and dotted/qualified input are rejected.
    The older `pg.ident` only escapes embedded quotes and rejects empty/LF/CR/TAB
    surfaces: it does not enforce complete NUL/C0 or byte-length admission and
