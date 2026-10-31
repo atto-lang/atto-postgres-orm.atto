@@ -93,6 +93,13 @@ pub routine main(): void {
   if !pg.table_typed_pk("runs", arr[
     pg.column_spec("id\"", "uuid", false)
   ], arr["id\""]).is_err() then panic("quoted typed column admitted"); fi
+  val checked_query = pg.find_in_workspace_checked("runs", "hostile' OR true--", "id");
+  if checked_query.is_err() then panic("safe workspace query table rejected"); fi
+  if checked_query.unwrap().sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("safe workspace query SQL"); fi
+  if checked_query.unwrap().params.get(0) != "hostile' OR true--" then panic("checked query value interpolation"); fi
+  if !pg.find_in_workspace_checked("schema.runs", "w", "i").is_err() then panic("qualified query table admitted"); fi
+  if !pg.find_in_workspace_checked("runs\"; --", "w", "i").is_err() then panic("quoted query table admitted"); fi
+  if !pg.find_in_workspace_checked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "w", "i").is_err() then panic("long query table admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
