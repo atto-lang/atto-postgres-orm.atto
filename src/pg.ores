@@ -68,7 +68,10 @@ define module pg as
       if key == "" then return Err("empty PostgreSQL primary-key identifier"); fi
       let bool found = false;
       for (val spec of columns) {
-        if spec.name == key then found = true; fi
+        if spec.name == key then
+          if spec.nullable then return Err("primary-key column must be NOT NULL"); fi
+          found = true;
+        fi
       }
       if !found then return Err("primary-key column is not declared"); fi
       let bool seen = false;
