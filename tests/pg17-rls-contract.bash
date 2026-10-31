@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# PostgreSQL 17 role/RLS and prepared-plan reuse contract, SQL-only.
+# NOT proof of Oreslang actor ownership, pool reset, or a live Oreslang driver.
+set -euo pipefail
+fail() { printf 'PG_RLS_NOT_VERIFIED: %s\n' "$*" >&2; exit 1; }
+[[ "${PG_TEST_DISPOSABLE:-}" == I_ACKNOWLEDGE_DISPOSABLE_DATABASE ]] ||
+  fail 'disposable database opt-in required'
+[[ -n "${PG_TEST_DSN:-}" ]] || fail 'PG_TEST_DSN missing'
+command -v psql >/dev/null 2>&1 || fail 'psql unavailable'
+
+major="$(psql -X -qAt -v ON_ERROR_STOP=1 "$PG_TEST_DSN" -c 'SHOW server_version_num')" ||
+  fail 'server version probe failed'
+[[ "$major" =~ ^17[0-9]{4}$ ]] || fail 'PostgreSQL 17 required'
+
+suffix="${RANDOM}_${RANDOM}_$$"
+schema="ores_rls_${suffix}"
+role_a="ores_rls_a_${suffix}"
+role_b="ores_rls_b_${suffix}"
+for ident in "$schema" "$role_a" "$role_b"; do
+  [[ "$ident" =~ ^[a-z0-9_]{1,63}$ ]] || fail "invalid generated identifier: $ident"
+done
+
+cleanup() {
+  set +e
+  psql -X -q -v ON_ERROR_STOP=0 \
+    -v "contract_schema=$schema" -v "role_a=$role_a" -v "role_b=$role_b" \
+    "$PG_TEST_DSN" >/dev/null 2>&1 <<'SQL'
+DROP SCHEMA IF EXISTS :"contract_schema" CASCADE;
+DROP ROLE IF EXISTS :"role_a";
+DROP ROLE IF EXISTS :"role_b";
+SQL
+}
+trap cleanup EXIT
+
+psql -X -q -v ON_ERROR_STOP=1 \
+  -v "contract_schema=$schema" -v "role_a=$role_a" -v "role_b=$role_b" \
+  "$PG_TEST_DSN" <<'SQL'
+CREATE SCHEMA :"contract_schema";
+CREATE ROLE :"role_a" NOLOGIN;
+CREATE ROLE :"role_b" NOLOGIN;
+GRANT USAGE ON SCHEMA :"contract_schema" TO :"role_a", :"role_b";
+CREATE TABLE :"contract_schema".records (
+  workspace_id uuid NOT NULL,
+  id uuid NOT NULL,
+  payload text NOT NULL,
+  PRIMARY KEY (workspace_id, id)
+);
+ALTER TABLE :"contract_schema".records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE :"contract_schema".records FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON :"contract_schema".records TO :"role_a", :"role_b";
+CREATE POLICY tenant_isolation ON :"contract_schema".records
+  USING (
+    (current_user = :'role_a' AND workspace_id = '00000000-0000-0000-0000-000000000001'::uuid)
+    OR
+    (current_user = :'role_b' AND workspace_id = '00000000-0000-0000-0000-000000000002'::uuid)
+  )
+  WITH CHECK (
+    (current_user = :'role_a' AND workspace_id = '00000000-0000-0000-0000-000000000001'::uuid)
+    OR
+    (current_user = :'role_b' AND workspace_id = '00000000-0000-0000-0000-000000000002'::uuid)
+  );
+INSERT INTO :"contract_schema".records VALUES
+ ('00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000010','record-a'),
+ ('00000000-0000-0000-0000-000000000002',
+  '00000000-0000-0000-0000-000000000010','record-b');
+SQL
+
+reuse="$({ psql -X -qAt -v ON_ERROR_STOP=1 \
+  -v "contract_schema=$schema" -v "role_a=$role_a" -v "role_b=$role_b" \
+  "$PG_TEST_DSN" <<'SQL'
+SET ROLE :"role_a";
+SELECT current_user;
+SELECT payload FROM :"contract_schema".records ORDER BY payload;
+PREPARE by_id(uuid) AS
+  SELECT payload FROM :"contract_schema".records WHERE id = $1 ORDER BY payload;
+EXECUTE by_id('00000000-0000-0000-0000-000000000010');
+RESET ROLE;
+SET ROLE :"role_b";
+SELECT current_user;
+SELECT payload FROM :"contract_schema".records ORDER BY payload;
+EXECUTE by_id('00000000-0000-0000-0000-000000000010');
+DEALLOCATE by_id;
+RESET ROLE;
+SQL
+} 2>&1)" || fail 'role/RLS prepared-plan reuse failed'
+expected="$(printf '%s\nrecord-a\nrecord-a\n%s\nrecord-b\nrecord-b' "$role_a" "$role_b")"
+[[ "$reuse" == "$expected" ]] || fail "unexpected role/RLS reuse result: $reuse"
+
+write_checks="$({ psql -X -qAt -v ON_ERROR_STOP=1 \
+  -v "contract_schema=$schema" -v "role_a=$role_a" \
+  "$PG_TEST_DSN" <<'SQL'
+SET ROLE :"role_a";
+WITH changed AS (
+  UPDATE :"contract_schema".records
+  SET payload = 'cross-tenant-update'
+  WHERE workspace_id = '00000000-0000-0000-0000-000000000002'::uuid
+  RETURNING 1
+) SELECT count(*) FROM changed;
+WITH removed AS (
+  DELETE FROM :"contract_schema".records
+  WHERE workspace_id = '00000000-0000-0000-0000-000000000002'::uuid
+  RETURNING 1
+) SELECT count(*) FROM removed;
+INSERT INTO :"contract_schema".records VALUES
+ ('00000000-0000-0000-0000-000000000001',
+  '00000000-0000-0000-0000-000000000011','record-a-2');
+SELECT count(*) FROM :"contract_schema".records;
+RESET ROLE;
+SQL
+} 2>&1)" || fail 'same-tenant write checks failed'
+[[ "$write_checks" == "$(printf '0\n0\n2')" ]] ||
+  fail "cross-tenant update/delete visibility changed: $write_checks"
+
+set +e
+denied="$(printf '%s\n' '\set VERBOSITY verbose' \
+  "SET ROLE :\"role_a\";" \
+  "INSERT INTO :\"contract_schema\".records VALUES ('00000000-0000-0000-0000-000000000002','00000000-0000-0000-0000-000000000012','forbidden');" |
+  psql -X -qAt -v ON_ERROR_STOP=1 \
+    -v "contract_schema=$schema" -v "role_a=$role_a" \
+    "$PG_TEST_DSN" 2>&1)"
+status=$?
+set -e
+[[ $status -ne 0 ]] || fail 'cross-tenant insert unexpectedly succeeded'
+grep -Fq '42501' <<<"$denied" || fail "cross-tenant insert lacked SQLSTATE 42501: $denied"
+
+tenant_b_count="$(psql -X -qAt -v ON_ERROR_STOP=1 \
+  -v "contract_schema=$schema" -v "role_b=$role_b" \
+  "$PG_TEST_DSN" <<'SQL'
+SET ROLE :"role_b";
+SELECT count(*) FROM :"contract_schema".records;
+RESET ROLE;
+SQL
+)" || fail 'tenant B post-denial query failed'
+[[ "$tenant_b_count" == "1" ]] || fail "tenant B row was modified or leaked: $tenant_b_count"
+
+printf '%s\n' 'PG_RLS_SQL_ONLY_PASS'
