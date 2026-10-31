@@ -262,6 +262,47 @@ pub routine main(): void {
   if owned_snapshot.param_at(1).unwrap() != "record-1" then
     panic("QueryPlan record parameter aliased source array");
   fi
+  // Typed bind metadata is independent of SQL text and remains actor-local.
+  val typed_bind_plan = pg.find_in_workspace_typed_plan_checked(
+    "runs", "hostile' OR true--", "record-1");
+  if typed_bind_plan.is_err() then panic("typed bind plan rejected admitted table"); fi
+  if typed_bind_plan.unwrap().sql != "SELECT * FROM \\"runs\\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then
+    panic("typed bind SQL template changed");
+  fi
+  if typed_bind_plan.unwrap().param_count() != 2 then panic("typed bind count"); fi
+  val workspace_bind = typed_bind_plan.unwrap().param_at(0);
+  if workspace_bind.is_err() then panic("missing workspace typed bind"); fi
+  if workspace_bind.unwrap().kind != "uuid" then panic("workspace bind type tag"); fi
+  if workspace_bind.unwrap().scalar != "hostile' OR true--" then panic("workspace value changed"); fi
+  if workspace_bind.unwrap().is_null then panic("workspace unexpectedly NULL"); fi
+  if typed_bind_plan.unwrap().param_at(1).unwrap().scalar != "record-1" then
+    panic("record typed bind value changed");
+  fi
+  if !typed_bind_plan.unwrap().param_at(-1).is_err() then panic("negative typed bind index"); fi
+  if !typed_bind_plan.unwrap().param_at(2).is_err() then panic("out-of-range typed bind index"); fi
+  if !pg.find_in_workspace_typed_plan_checked("schema.runs", "w", "i").is_err() then
+    panic("qualified typed bind table admitted");
+  fi
+  if !pg.find_in_workspace_typed_plan_checked("runsé", "w", "i").is_err() then
+    panic("unicode typed bind table admitted");
+  fi
+  if !pg.checked_db_value("uuid; DROP TABLE runs;--", "x", false).is_err() then
+    panic("arbitrary bind type tag admitted");
+  fi
+  if !pg.checked_db_value("text", "nonempty", true).is_err() then
+    panic("NULL bind payload admitted");
+  fi
+  val safe_text_bind = pg.checked_db_value("text", "'); DROP TABLE runs;--", false);
+  if safe_text_bind.is_err() then panic("text parameter improperly rejected"); fi
+  if safe_text_bind.unwrap().scalar != "'); DROP TABLE runs;--" then
+    panic("text bind value changed");
+  fi
+  if !pg.checked_db_value("bytea", "", true).is_ok() then
+    panic("typed NULL bytea rejected");
+  fi
+  if !pg.checked_db_value("text", "", false).is_ok() then
+    panic("empty non-NULL text parameter rejected");
+  fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
