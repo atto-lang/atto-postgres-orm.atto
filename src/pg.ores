@@ -84,13 +84,15 @@ pub define class ConstraintSpec as
 end
 
 define module pg as
-  // Deliberately partial admission. The driver must still verify every C0,
-  // NUL and PostgreSQL's UTF-8 identifier byte limit before execution.
+  // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
+  // This is NOT full UTF-8 byte-length validation; legacy SQL methods
+  // remain trusted-only and require driver-side 63-byte PostgreSQL checks.
   pub fnc invalid_identifier_surface(string name): bool {
-    return name == ""
-      || name.replace_literal("\n", "") != name
-      || name.replace_literal("\r", "") != name
-      || name.replace_literal("\t", "") != name;
+    if name == "" then return true; fi
+    for (val control of arr["\u0000", "\u0001", "\u0002", "\u0003", "\u0004", "\u0005", "\u0006", "\u0007", "\u0008", "\t", "\n", "\u000b", "\u000c", "\r", "\u000e", "\u000f", "\u0010", "\u0011", "\u0012", "\u0013", "\u0014", "\u0015", "\u0016", "\u0017", "\u0018", "\u0019", "\u001a", "\u001b", "\u001c", "\u001d", "\u001e", "\u001f", "\u007f"]) {
+      if name.replace_literal(control, "") != name then return true; fi
+    }
+    return false;
   }
   pub fnc ident(string name): string {
     // Legacy string API panics on bad surface; typed builders return Err.
