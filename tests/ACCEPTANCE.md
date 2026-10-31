@@ -249,14 +249,20 @@ the corresponding SQL on an ephemeral PostgreSQL schema, verifies UNIQUE,
 FOREIGN KEY, NOT NULL and composite PRIMARY KEY behavior, rolls back and
 confirms the schema did not persist.
 
+The SQL gate now requires a successful `SHOW server_version_num` response
+identifying the **PostgreSQL 17 server**, not merely a PostgreSQL 17 client.
 The separate host-only mock `bash tests/verify-pg17-ddl-host.bash` passed
-**5/5** locally (missing opt-in, missing DSN, normal fake psql, unexpected
-nonzero schema count, failed psql process). Its exact GitHub blobs were matched
-to the locally syntax-checked and executed scripts:
+**9/9** locally (missing opt-in, missing DSN, normal fake psql, unexpected
+nonzero schema count, failed SQL process, PostgreSQL 16, PostgreSQL 18,
+malformed server version, and failed version probe). Its exact GitHub blobs
+matched the locally syntax-checked and executed scripts:
 `tests/pg17-ddl-contract.bash` =
-`c48480cec98a86c046d89363a553188031c97735`,
+`3dc4855c7530b5bac2c2efb6962f61381b837547`,
 `tests/verify-pg17-ddl-host.bash` =
-`2e204ce0596ea24c8768f7a3023ecc3c55903475`.
+`f6bee1cdc4f74ca4685851e55da466e97da256e3`.
+
+The previous **5/5** evidence belongs to earlier script blobs. This **9/9**
+result proves only fake-psql control flow; no real PostgreSQL 17 process ran.
 
 **Actual PostgreSQL 17 SQL execution: pending until a CI runner admits the
 service job, or an authorized disposable database is supplied.** Native JDK25
