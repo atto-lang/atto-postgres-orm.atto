@@ -38,7 +38,7 @@ cargo run --manifest-path tools/rollout-evidence/Cargo.toml --offline --locked -
 cargo run --manifest-path tools/rollout-evidence/Cargo.toml --offline --locked -- receipt.tsv EXPECTED_COMMIT EXPECTED_TREE EXPECTED_CORPUS_SHA256
 ```
 
-The receipt is canonical ASCII/LF TSV, at most 1 MiB, with this exact header:
+The receipt is canonical ASCII/LF TSV, at most 1 MiB, **must end in a single LF**, and has this exact header:
 
 ```text
 repository	suite	backend	phase	outcome	commit	tree	corpus_sha256	run_id	job_id	steps	tests	exit_code	artifact_sha256
@@ -57,7 +57,7 @@ counts and a nonzero 64-hex artifact digest are consistent. For a rejection row,
 exit 0 is the **negative-test harness** exit; the artifact must record the
 expected failing compiler exit/diagnostic and absent output artifact.
 Skipped, queued, cancelled, unexecuted and intentional capability rejection
-statuses fail a required execution row. Whitespace ambiguity, unknown columns,
+statuses fail a required execution row. Missing final LF, whitespace ambiguity, unknown columns,
 duplicate cases, missing cases and stale pins are rejected.
 
 Success prints `CONSISTENT_UNAUTHENTICATED_RECEIPT`, never VERIFIED.
