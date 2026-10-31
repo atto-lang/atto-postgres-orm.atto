@@ -326,19 +326,18 @@ pub routine main(): void {
   fi
   val omitted = pg.plan_update_field_checked("docs", note_field,
     pg.change_not_set(), uuid_a, uuid_b);
-  if omitted.is_err() || !omitted.unwrap().is_noop || omitted.unwrap().param_count() != 0 then
+  if omitted.is_err() then panic("NotSet planner returned error"); fi
+  if !omitted.unwrap().is_noop || omitted.unwrap().param_count() != 0 then
     panic("NotSet must not write or bind");
   fi
   val unchanged = pg.plan_update_field_checked("docs", required_field,
     pg.change_unchanged(pg.db_text("old")), uuid_a, uuid_b);
-  if unchanged.is_err() || !unchanged.unwrap().is_noop then
-    panic("Unchanged must not write");
-  fi
+  if unchanged.is_err() then panic("Unchanged planner returned error"); fi
+  if !unchanged.unwrap().is_noop then panic("Unchanged must not write"); fi
   val explicit_null = pg.plan_update_field_checked("docs", note_field,
     pg.change_set(pg.db_null_checked("text").unwrap()), uuid_a, uuid_b);
-  if explicit_null.is_err() || explicit_null.unwrap().is_noop then
-    panic("nullable SQL NULL rejected");
-  fi
+  if explicit_null.is_err() then panic("nullable SQL NULL planner returned error"); fi
+  if explicit_null.unwrap().is_noop then panic("nullable SQL NULL rejected"); fi
   if !explicit_null.unwrap().param_at(0).unwrap().is_null then
     panic("SQL NULL lost its explicit tag");
   fi
@@ -390,7 +389,8 @@ pub routine main(): void {
   returned_columns.set(3, pg.column_spec("another_tamper", "text", false));
   val schema_patch = pg.plan_schema_update_field_checked(schema_result.unwrap(), "note",
     pg.change_set(pg.db_text("safe")), uuid_a, uuid_b);
-  if schema_patch.is_err() || schema_patch.unwrap().is_noop then
+  if schema_patch.is_err() then panic("schema snapshot planner returned error"); fi
+  if schema_patch.unwrap().is_noop then
     panic("schema descriptor column snapshots were mutable");
   fi
   if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "tampered",
