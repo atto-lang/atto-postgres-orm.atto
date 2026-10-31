@@ -16,8 +16,7 @@ val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
 // Adapter executes query.sql and binds query.params separately.
 ```
 
-Constraint strings are explicitly trusted, source-authored SQL. They must never
-receive user input. Identifiers are quoted; types are admitted from a closed list.
+Constraint strings and pre-rendered column strings are explicitly **trusted, source-authored SQL**. They must never receive user input or be treated as a SQL-injection security boundary. Identifiers are quoted (including embedded quotes), and empty identifiers are now rejected; types are admitted from a closed list. The driver/admission layer must additionally reject NUL/control characters, enforce PostgreSQL's 63-byte identifier limit, and reject unsafe or ambiguous qualified identifiers before executing DDL. That stronger identifier policy is **not implemented by this planner** and remains a release blocker.
 Query values never become SQL text. UUID parameters are cast by PostgreSQL rather
 than interpolated. `Query.params` is an actor-local array; do not share mutable
 plans across execution domains.
