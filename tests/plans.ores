@@ -184,6 +184,30 @@ pub routine main(): void {
     pg.constraint_foreign_key(arr["id", "code"], "workspaces", arr["id", "id"])
   ]).is_err() then panic("duplicate foreign referenced columns admitted"); fi
 
+  // ConstraintSpec snapshots caller arrays before typed schema planning.
+  let Array<string> unique_names = arr["code"];
+  val unique_snapshot = pg.constraint_unique(unique_names);
+  unique_names.set(0, "not_declared");
+  val snap_unique_ddl = pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("code", "text", false)
+  ], arr["id"], arr[unique_snapshot]);
+  if snap_unique_ddl.is_err() then panic("UNIQUE constraint source-array mutation leaked"); fi
+  if snap_unique_ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  \"code\" text NOT NULL,\n  PRIMARY KEY (\"id\"),\n  UNIQUE (\"code\")\n);\n" then
+    panic("UNIQUE constraint source-array snapshot changed");
+  fi
+  let Array<string> local_fk_names = arr["id"];
+  let Array<string> remote_fk_names = arr["id"];
+  val fk_snapshot = pg.constraint_foreign_key(local_fk_names, "workspaces", remote_fk_names);
+  local_fk_names.set(0, "other_local");
+  remote_fk_names.set(0, "other_remote");
+  val snap_fk_ddl = pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[fk_snapshot]);
+  if snap_fk_ddl.is_err() then panic("FOREIGN KEY constraint source-array mutation leaked"); fi
+  if snap_fk_ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  PRIMARY KEY (\"id\"),\n  FOREIGN KEY (\"id\") REFERENCES \"workspaces\" (\"id\")\n);\n" then
+    panic("FOREIGN KEY source-array snapshot changed");
+  fi
   // QueryPlan hides its copied Array and exposes only typed scalar reads.
   val checked_plan = pg.find_in_workspace_plan_checked("runs", "tenant-a", "run-1");
   if checked_plan.is_err() then panic("checked plan rejected admitted table"); fi
