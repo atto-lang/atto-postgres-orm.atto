@@ -1,0 +1,38 @@
+name: Host-only PostgreSQL verifier self-tests (NOT native)
+on:
+  pull_request:
+    paths:
+      - 'scripts/verify-native-plans'
+      - 'tests/verify-native-plans-host.bash'
+      - '.github/workflows/pg-host-verifier.yml'
+  push:
+    branches:
+      - 'hardening/typed-pg-ddl-pk-20261030'
+    paths:
+      - 'scripts/verify-native-plans'
+      - 'tests/verify-native-plans-host.bash'
+      - '.github/workflows/pg-host-verifier.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-only-mock-oracles:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Checkout within the same private repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash -n scripts/verify-native-plans
+          bash -n tests/verify-native-plans-host.bash
+      - name: Seven host-only fake-compiler failure-injection tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          bash tests/verify-native-plans-host.bash
+          printf '%s\n' 'HOST_ONLY_VERIFIER_TESTS_COMPLETE: No native Oreslang guest or PostgreSQL executed'
