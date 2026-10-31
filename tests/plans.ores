@@ -100,6 +100,63 @@ pub routine main(): void {
   if !pg.find_in_workspace_checked("schema.runs", "w", "i").is_err() then panic("qualified query table admitted"); fi
   if !pg.find_in_workspace_checked("runs\"; --", "w", "i").is_err() then panic("quoted query table admitted"); fi
   if !pg.find_in_workspace_checked("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "w", "i").is_err() then panic("long query table admitted"); fi
+  // Typed UNIQUE and FOREIGN KEY extensions never admit source SQL fragments.
+  val constrained = pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("external_id", "text", false)
+  ], arr["workspace_id", "id"], arr[
+    pg.constraint_unique(arr["workspace_id", "external_id"]),
+    pg.constraint_foreign_key(arr["workspace_id"], "workspaces", arr["id"])
+  ]);
+  if constrained.is_err() then panic("valid typed UNIQUE/FK rejected"); fi
+  if constrained.unwrap() != "CREATE TABLE \"docs\" (\n  \"workspace_id\" uuid NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"external_id\" text NOT NULL,\n  PRIMARY KEY (\"workspace_id\", \"id\"),\n  UNIQUE (\"workspace_id\", \"external_id\"),\n  FOREIGN KEY (\"workspace_id\") REFERENCES \"workspaces\" (\"id\")\n);\n" then
+    panic("typed UNIQUE/FK golden SQL mismatch");
+  fi
+  val no_extras = pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[]);
+  val plain_pk = pg.table_typed_pk("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]);
+  if no_extras.is_err() || plain_pk.is_err() then panic("empty constraint list rejected"); fi
+  if no_extras.unwrap() != plain_pk.unwrap() then panic("empty constraints changed PK SQL"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_unique(arr["missing"])
+  ]).is_err() then panic("unknown UNIQUE local column admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_unique(arr["id", "id"])
+  ]).is_err() then panic("duplicate UNIQUE columns admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_unique(arr[])
+  ]).is_err() then panic("empty UNIQUE admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_unique(arr["id"]),
+    pg.constraint_unique(arr["id"])
+  ]).is_err() then panic("duplicate UNIQUE constraint admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "workspaces", arr["id", "other"])
+  ]).is_err() then panic("foreign key arity mismatch admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "workspaces; DROP TABLE docs;--", arr["id"])
+  ]).is_err() then panic("foreign key target SQL injection admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "workspaces", arr["schema.id"])
+  ]).is_err() then panic("qualified FK referenced column admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
