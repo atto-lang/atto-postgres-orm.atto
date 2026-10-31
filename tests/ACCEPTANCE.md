@@ -1,6 +1,6 @@
 # PostgreSQL planner: executable acceptance gates
 
-Status: **NOT EXECUTED at this pull-request head**. This is a guest test plan and
+Status: **NATIVE ORESLANG GUEST NOT EXECUTED at this pull-request head**. This is a guest test plan and
 expected-oracle inventory, not a substitute for a native Oreslang compiler run.
 The ORM planner does not execute SQL, authenticate tenants or own a DB socket.
 
@@ -107,11 +107,41 @@ its scenario count remains ten.
 
 A source-level cross-file audit confirmed **14/14 control catalog,
 fixture, verifier, and mock-harness invariants**, with all 33 distinct
-control values in both independent catalogs. The **newly modified host
-suite and native guest have not been executed** at this head. The earlier
-10/10 host mock PASS cited above pertains to preceding verifier/mock
-blobs, not this revision. The isolated JDK25 compiler and PostgreSQL
+control values in both independent catalogs. The expanded four-guest **host-only** suite has now executed and passed
+at the current scripts' exact Git blobs (see the updated host receipt below).
+The native Oreslang guest has **not** executed. Earlier mock results
+remain historical evidence for older verifier/mock blobs. The isolated JDK25 compiler and PostgreSQL
 integration remain unexecuted.
+
+## 2026-10-31 current-head executable host gate (NOT native)
+
+The verifier now enforces exact guest-case order
+(`positive`, `empty-identifier`, `empty-table`, `control-identifier`)
+and requires exactly four `PASS` rows, plus a TSV header, before it may
+write a `VERIFIED:` receipt. This is an independent check in addition
+to calling each guest. The host harness checks the existence of those
+fail-closed manifest gates.
+
+**Executed against byte-identical script files (Linux, Bash + Git):**
+`bash -n` passed all four scripts; the verifier mock suite
+**10/10 PASS** and Java launcher mock suite **8/8 PASS**.
+
+- `scripts/verify-native-plans` Git blob:
+  `8e356f83ba8acf445ca296c99d5c5bbd58a3af97`
+- `tests/verify-native-plans-host.bash` Git blob:
+  `bec97bcfd19e912b017c36bb1c37c27d8b7301df`
+- `scripts/ores` Git blob:
+  `f6f6319e671f7caa09d927156fe389a2c22b5ce5`
+- `tests/verify-launcher-host.bash` Git blob:
+  `106ac7192dd765b7d46f66206662ec89c69979b4`
+
+The host mock suite deliberately uses fake compiler and guest worktrees
+and locally verified **source excerpts**, not full byte-identical
+`src/pg.ores` or `tests/plans.ores` files. It proves the verifier's
+mocked control flow and guard presence, **not** the real Oreslang
+compiler, an actual PostgreSQL database, tenant isolation, or backend
+parity. The updated tests are not a successful source-org Actions run;
+CI admission still fails with zero executed steps.
 
 ## One-command native execution gate
 
