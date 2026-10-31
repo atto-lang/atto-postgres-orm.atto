@@ -238,3 +238,28 @@ positive nor negative planner tests prove SQL execution or tenant isolation.
 Keep Rust receipt-inspector host tests and Oreslang guest/backend test evidence
 as **separate** classes. A syntactically consistent TSV receipt cannot certify
 that the GitHub job or compiler actually executed.
+
+## SQL-only PostgreSQL 17 executable constraint gate
+
+An independent integration workflow `.github/workflows/pg17-ddl-integration.yml`
+provisions PostgreSQL 17 and invokes `tests/pg17-ddl-contract.bash` with
+an explicit disposable-database opt-in. This test renders **no** native guest
+source: it checks that the authored Oreslang golden remains unchanged, executes
+the corresponding SQL on an ephemeral PostgreSQL schema, verifies UNIQUE,
+FOREIGN KEY, NOT NULL and composite PRIMARY KEY behavior, rolls back and
+confirms the schema did not persist.
+
+The separate host-only mock `bash tests/verify-pg17-ddl-host.bash` passed
+**5/5** locally (missing opt-in, missing DSN, normal fake psql, unexpected
+nonzero schema count, failed psql process). Its exact GitHub blobs were matched
+to the locally syntax-checked and executed scripts:
+`tests/pg17-ddl-contract.bash` =
+`c48480cec98a86c046d89363a553188031c97735`,
+`tests/verify-pg17-ddl-host.bash` =
+`2e204ce0596ea24c8768f7a3023ecc3c55903475`.
+
+**Actual PostgreSQL 17 SQL execution: pending until a CI runner admits the
+service job, or an authorized disposable database is supplied.** Native JDK25
+Oreslang compilation, driver parameter binding, cancellation, independent
+tenant RLS and five-backend parity remain distinct unfulfilled gates. The
+SQL-only job must not be counted as native or production release evidence.
