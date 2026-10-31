@@ -251,15 +251,18 @@ confirms the schema did not persist.
 
 The SQL gate now requires a successful `SHOW server_version_num` response
 identifying the **PostgreSQL 17 server**, not merely a PostgreSQL 17 client.
+It also checks `current_setting('server_version_num')` inside the same SQL
+transaction as the DDL, so the preflight connection alone cannot certify
+a separately routed PostgreSQL backend.
 The separate host-only mock `bash tests/verify-pg17-ddl-host.bash` passed
 **9/9** locally (missing opt-in, missing DSN, normal fake psql, unexpected
 nonzero schema count, failed SQL process, PostgreSQL 16, PostgreSQL 18,
 malformed server version, and failed version probe). Its exact GitHub blobs
 matched the locally syntax-checked and executed scripts:
 `tests/pg17-ddl-contract.bash` =
-`3dc4855c7530b5bac2c2efb6962f61381b837547`,
+`445fd679fa4024e5cd479581f953ac2bc195b6ad`,
 `tests/verify-pg17-ddl-host.bash` =
-`f6bee1cdc4f74ca4685851e55da466e97da256e3`.
+`6a5b118fd4e19aa60a7b1111a6dc69235385c6ca`.
 
 The previous **5/5** evidence belongs to earlier script blobs. This **9/9**
 result proves only fake-psql control flow; no real PostgreSQL 17 process ran.
