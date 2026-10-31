@@ -32,23 +32,35 @@ bash tests/verify-native-plans-host.bash
 This test is deliberately isolated from the real guest: it initializes
 temporary **mock Git repositories**, a fake Maven build, a fake Java 25
 launcher, and fake guest outcomes, then removes them. No fake receipt is
-valid native evidence. Nine authored cases cover normal mocked results,
-missing negative guest sentinel, mismatched Maven Java, stale evidence
-directory, wrong reviewed ORM SHA, untracked fixture, **ignored guest file**,
-**ignored compiler source**, and dirty tracked source. A Git ignore pattern
-is not a trusted compiler or guest execution boundary.
+valid native evidence. Ten cases cover normal mocked results; missing
+guest-start sentinel; **wrong negative panic diagnostic**; wrong Maven Java;
+stale evidence directory; wrong reviewed ORM SHA; untracked fixture;
+ignored guest and compiler source; and dirty tracked source.
 
-An earlier seven-case harness was exercised locally against older
-Git blobs. The current **nine-case** harness and verifier are identified by
-Git blobs `5aa9db4edbe4f3be7a2fd014e523077fa3de7d3d` and
-`7a211fd93fdf979474f256df49214be25065712e`, respectively.
-Both current scripts were reconstructed locally byte-for-byte: their
-`git hash-object` values matched the two GitHub blob SHAs above. Both
-passed `bash -n`, and the complete **9/9 host-only mocked scenarios
-executed and passed locally**, including ignored guest and ignored compiler
-files. The test printed `MOCK_HOST_GATE_SCENARIOS=9/9 PASS`.
-These results are verifier control-flow evidence **only**; they do not
-establish native Oreslang compiler/guest or real PostgreSQL execution.
+### Exact diagnostic oracle (P0 correction)
+
+The negative fixture `pg.find_in_workspace("", ...)` reaches
+`pg.ident("")`, whose actual source panic is
+`invalid PostgreSQL identifier surface`. The previous verifier
+mistakenly expected `empty PostgreSQL identifier` and would have
+falsely rejected the correctly failing guest. The real negative oracle
+now matches the authored panic string.
+
+To prevent future drift, the host mock-suite first checks that both
+verifier diagnostics match explicit `panic(...)` strings in
+`src/pg.ores`, and that both negative fixtures call their intended
+operations. The wrong-diagnostic case must fail closed.
+
+**Executed host-only evidence:** exact reconstructed verifier Git blob
+`690244a50f8dbb2a690d1d9dd82655cf399e179d`; mock-suite Git blob
+`54503f9273c50c3cfb2483562165f1f4081ec799`.
+Both SHA-1 blobs matched the GitHub source; both passed `bash -n`;
+the full ten-case mocked suite ran locally and printed
+`MOCK_HOST_GATE_SCENARIOS=10/10 PASS`. Source diagnostics were
+checked against verified excerpts from `src/pg.ores` and the two
+negative fixtures. These are **host/mock tests only**. The true Oreslang
+compiler, guest panics, live PostgreSQL behavior, and cross-backend
+parity remain **NOT EXECUTED**.
 
 The separate CI job `.github/workflows/pg-host-verifier.yml` runs these
 host-only checks after runner admission is restored. It cannot satisfy the
