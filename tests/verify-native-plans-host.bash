@@ -42,10 +42,12 @@ else
 fi
 MOCK_MAVEN
 chmod +x "$work/bin/mvn" "$work/bin/java"
-printf 'target/\ndeps.jar\n' > "$work/compiler/.gitignore"
+printf 'target/\ndeps.jar\nsrc/ignored-compiler.java\n' > "$work/compiler/.gitignore"
 (cd "$work/compiler" && git init -q && git config user.email mock@example.test && git config user.name mock && git add .gitignore && git commit -qm init)
 pinned="$(git -C "$work/compiler" rev-parse HEAD)"
 printf '%s\n' "$pinned" > "$work/orm/SOURCE_REF"
+# This ignored source path must not be exempted from guest provenance.
+printf 'tests/negative/ignored-guest.ores\n' > "$work/orm/.gitignore"
 (cd "$work/orm" && git init -q && git config user.email mock@example.test && git config user.name mock && git add . && git commit -qm init)
 head="$(git -C "$work/orm" rev-parse HEAD)"
 export PATH="$work/bin:$PATH" ORESLANG_SOURCE_DIR="$work/compiler" ORES_JAVA="$work/bin/java" EXPECTED_ORM_SHA="$head"
@@ -87,6 +89,13 @@ export EXPECTED_ORM_SHA="$head"
 printf 'UNTRACKED MOCK GUEST\n' > "$work/orm/tests/negative/untracked.ores"
 run_case untracked-guest-input reject
 rm "$work/orm/tests/negative/untracked.ores"
+printf 'IGNORED MOCK GUEST\n' > "$work/orm/tests/negative/ignored-guest.ores"
+run_case ignored-guest-input reject
+rm "$work/orm/tests/negative/ignored-guest.ores"
+mkdir -p "$work/compiler/src"
+printf 'IGNORED MOCK COMPILER INPUT\n' > "$work/compiler/src/ignored-compiler.java"
+run_case ignored-compiler-input reject
+rm "$work/compiler/src/ignored-compiler.java"
 printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
 run_case dirty-worktree reject
-echo 'MOCK_HOST_GATE_SCENARIOS=7/7 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
+echo 'MOCK_HOST_GATE_SCENARIOS=9/9 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
