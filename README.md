@@ -76,6 +76,25 @@ Run the native contracts with JDK 25 and the clean compiler commit in `SOURCE_RE
 ORESLANG_SOURCE_DIR=../oreslang-source.java ./scripts/ores tests/plans.ores
 ```
 
+For a **fresh, fail-closed release gate** (preferred over manually running
+one positive fixture), invoke `./scripts/verify-native-plans` on a clean,
+reviewed exact-head checkout using Java 25 and an authorized private compiler:
+
+```sh
+EXPECTED_ORM_SHA=<reviewed-40-hex-commit> \
+ORESLANG_SOURCE_DIR=/absolute/path/to/oreslang-source.java \
+ORES_JAVA=/absolute/path/to/jdk25/bin/java \
+./scripts/verify-native-plans
+```
+
+The harness rebuilds the pinned compiler, records source and artifact SHA-256
+identity, runs the positive and both separate negative guest processes, and
+refuses to certify a negative failure unless the guest printed its own runtime
+start sentinel before the expected panic. The evidence files are stored outside
+the repo and **cannot substitute for independently executed CI job steps**.
+See [guest acceptance gates](tests/ACCEPTANCE.md). No native guest execution
+is claimed for this PR until real receipts and job logs are reviewed.
+
 The compiler must first be built with Maven, including a `target/classpath.txt`:
 `mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt`.
 The launcher verifies the revision and rejects tracked compiler modifications.
