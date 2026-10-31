@@ -12,7 +12,7 @@ val sql = pg.table_typed_pk("workflows", arr[
   pg.column_spec("id", "uuid", false),
   pg.column_spec("name", "text", false)
 ], arr["workspace_id", "id"]);
-val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
+val query = pg.find_in_workspace_checked("workflows", workspace_id, workflow_id).unwrap();
 // Adapter executes query.sql and binds query.params separately.
 ```
 
@@ -41,6 +41,11 @@ column and primary-key names). Quotes, dots, Unicode, NUL and controls
 are rejected rather than normalized or truncated. `pg.ident`,
 `pg.column`, `pg.table` and `pg.find_in_workspace` remain legacy
 surfaces without full admission and must not receive untrusted identifiers.
+
+The new `find_in_workspace_checked` method applies the same strict identifier
+policy to workspace-query table names and returns `Result<Query,string>`. It
+still exposes an actor-local mutable parameter array and does not validate
+workspace membership. The legacy `find_in_workspace` remains for compatibility.
 
 **This does not establish safe database execution.** SQL names, even
 admitted names, are not tenant authority. Other constraints, capabilities,
