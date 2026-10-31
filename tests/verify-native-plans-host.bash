@@ -8,6 +8,11 @@ grep -Fq 'panic("invalid PostgreSQL identifier surface")' "$root/src/pg.ores"
 grep -Fq 'panic("PostgreSQL table requires at least one column")' "$root/src/pg.ores"
 grep -Fq 'pg.find_in_workspace("",' "$root/tests/negative/empty_identifier.ores"
 grep -Fq 'pg.table("no_columns", arr[], arr[])' "$root/tests/negative/empty_table.ores"
+grep -Fq 'pg.ident("bad\u0001name")' "$root/tests/negative/control_identifier.ores"
+grep -Fq "run_guest control-identifier tests/negative/control_identifier.ores 'invalid PostgreSQL identifier surface'" "$root/scripts/verify-native-plans"
+# Confirm source and guest maintain independent complete ASCII control catalogs.
+grep -Fq 'for (val control of arr[' "$root/src/pg.ores"
+grep -Fq 'for (val control of arr[' "$root/tests/plans.ores"
 grep -Fq "run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'" "$root/scripts/verify-native-plans"
 grep -Fq "run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'" "$root/scripts/verify-native-plans"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-harness-mock.XXXXXXXX")"
@@ -31,11 +36,14 @@ case "$1" in
   tests/negative/empty_table.ores)
     echo PG_NEGATIVE_EMPTY_TABLE_STARTED
     echo 'PostgreSQL table requires at least one column' >&2; exit 18;;
+  tests/negative/control_identifier.ores)
+    echo PG_NEGATIVE_CONTROL_IDENTIFIER_STARTED
+    echo 'invalid PostgreSQL identifier surface' >&2; exit 19;;
   *) echo "unexpected mocked guest $1" >&2; exit 127;;
 esac
 MOCK_GUEST
 chmod +x "$work/orm/scripts/ores" "$work/orm/scripts/verify-native-plans"
-for path in src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores; do
+for path in src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
   echo 'MOCK PLACEHOLDER, NOT ORESLANG SOURCE' > "$work/orm/$path"
 done
 cat > "$work/bin/java" <<'MOCK_JAVA'
@@ -74,7 +82,7 @@ run_case() {
   set -e
   if [[ "$expectation" == pass ]]; then
     [[ "$rc" -eq 0 && "$(cut -f3 "$evidence/outcomes.tsv" | tail -n+2 | sort -u)" == PASS
-       && $(wc -l < "$evidence/outcomes.tsv") -eq 4
+       && $(wc -l < "$evidence/outcomes.tsv") -eq 5
        && "$(cat "$evidence/RESULT.txt")" == VERIFIED:* ]] ||
       { echo "MOCK HARNESS $scenario unexpected rejection (exit $rc)" >&2; cat "$output.stderr" >&2; exit 1; }
   else
