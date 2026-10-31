@@ -118,6 +118,7 @@ define module pg as
       sql = sql + "\n  " + column;
       first = false;
     }
+    if first then panic("PostgreSQL table requires at least one column"); fi
     for (val constraint of trusted_constraints) {
       sql = sql + ",\n  " + constraint;
     }
