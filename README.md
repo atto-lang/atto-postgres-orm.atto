@@ -7,11 +7,11 @@ queries.** A native DB capability/driver remains required.
 
 ```ores
 import module pg from './src/pg';
-val sql = pg.table("workflows", arr[
-  pg.column("workspace_id", "uuid", false).unwrap(),
-  pg.column("id", "uuid", false).unwrap(),
-  pg.column("name", "text", false).unwrap()
-], arr["PRIMARY KEY (workspace_id, id)"]);
+val sql = pg.table_typed_pk("workflows", arr[
+  pg.column_spec("workspace_id", "uuid", false),
+  pg.column_spec("id", "uuid", false),
+  pg.column_spec("name", "text", false)
+], arr["workspace_id", "id"]);
 val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
 // Adapter executes query.sql and binds query.params separately.
 ```
@@ -21,7 +21,8 @@ val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
 For tables with a primary key, prefer `table_typed_pk` over raw column and
 constraint fragments. `column_spec` carries names/types/nullability as data;
 the builder checks the type allowlist, nonempty column/table/key names, duplicate
-columns and primary-key entries, nullable primary-key columns, and primary-key\nreferences to declared columns.
+columns and primary-key entries, nullable primary-key columns, and primary-key
+references to declared columns.
 It returns `Result<string,string>` rather than silently accepting those errors.
 
 ```ores
@@ -32,19 +33,30 @@ val ddl = pg.table_typed_pk("workflows", arr[
 ], arr["workspace_id", "id"]);
 ```
 
-This **does not** establish safe database execution. The planner rejects
-empty names and LF/CR/TAB surfaces, but PostgreSQL identifier admission still
-requires a complete C0/NUL policy and UTF-8 byte-length validation. Other DDL
-constraints, tenant capabilities, connection driver, transactions, RLS and live
-PostgreSQL tests remain release blockers. Callers must not feed untrusted
-identifiers or mutable query plans to an execution adapter.
+The new `admitted_identifier` uses the pinned Java compiler's
+`is_identifier`, `replace_literal`, `split_literal` and collection
+`length` operations. Only ASCII `[A-Za-z_][A-Za-z0-9_]*` identifiers
+of **1–63 UTF-8 bytes** are admitted to `table_typed_pk` (including
+column and primary-key names). Quotes, dots, Unicode, NUL and controls
+are rejected rather than normalized or truncated. `pg.ident`,
+`pg.column`, `pg.table` and `pg.find_in_workspace` remain legacy
+surfaces without full admission and must not receive untrusted identifiers.
+
+**This does not establish safe database execution.** SQL names, even
+admitted names, are not tenant authority. Other constraints, capabilities,
+connection drivers, transactions, RLS and live PostgreSQL tests remain release
+blockers. Do not share mutable query plans across execution domains.
 
 The legacy `table(name, columns, trusted_constraints)` method is retained only
 for source-authored trusted fragments and backward compatibility. It is unsafe
 for inputs influenced by a tenant or request, even when identifiers are quoted.
 There is no implicit migration from that API to the typed builder.
 
-Constraint strings and pre-rendered column strings are explicitly **trusted, source-authored SQL**. They must never receive user input or be treated as a SQL-injection security boundary. Identifiers are quoted (including embedded quotes), and empty identifiers are now rejected; types are admitted from a closed list. The driver/admission layer must additionally reject NUL/control characters, enforce PostgreSQL's 63-byte identifier limit, and reject unsafe or ambiguous qualified identifiers before executing DDL. That stronger identifier policy is **not implemented by this planner** and remains a release blocker.
+Constraint strings and pre-rendered column strings are explicitly **trusted,
+source-authored SQL**. They must never receive user input. The restricted
+typed DDL path has stronger identifier admission than the legacy string API;
+the legacy admission boundary still requires NUL/C0 and UTF-8-length checks
+before executing arbitrary quoted names.
 Query values never become SQL text. UUID parameters are cast by PostgreSQL rather
 than interpolated. `Query.params` is an actor-local array; do not share mutable
 plans across execution domains.
