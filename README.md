@@ -147,8 +147,10 @@ if compiler source is dirty/untracked/ignored, or if compiled
 falls back from a supplied `ORES_JAVA` to an arbitrary system runtime.
 
 Run host-only launcher preflight tests with
-`bash tests/verify-launcher-host.bash`; eight mocked test cases passed
-locally against the exact launcher and test blobs. This is **not**
+`bash tests/verify-launcher-host.bash`; **11/11** mock cases passed locally
+against the exact launcher (`fc88f48a612f32954c3919100476f424f7f74cab`)
+and host test (`d89f6ef3d278b85a54086fe797b118347561069e`) Git blobs.
+The launcher now rejects stale fallback classpaths and symlinked runtime artifacts. This is **not**
 Oreslang guest execution or PostgreSQL integration evidence.
 
 Next: typed DbValue/DbRow and error surfaces, actor-confined prepared statements,
@@ -187,8 +189,9 @@ The `pg17-ddl-integration.yml` workflow provisions a disposable PostgreSQL 17
 service when Actions runners are admitted. The `pg-host-verifier.yml` workflow
 runs `bash tests/verify-pg17-ddl-host.bash` with fake `psql`, testing fail-closed
 admission, rollback-output, and PostgreSQL server-major checks. The updated
-suite passed **9/9 local host/mock scenarios**, including rejecting server
-versions 16 and 18, malformed version output, and failed version inspection,
+suite passed **10/10 local host/mock scenarios**, including rejecting server
+versions 16 and 18, malformed version output, failed version inspection,
+and a drifted fixture rejected before any database contact,
 against exact, byte-verified GitHub blobs. **No live PostgreSQL
 server, native Oreslang compiler or real driver was executed locally**, and a
 zero-step GitHub job cannot count as execution. This SQL-only test does not
