@@ -23,6 +23,16 @@ a scope and release-gating contract, not certification.
    restricted DDL builder, **not** general PostgreSQL AST coverage.
    Lexical identifier admission does not establish tenant authorization,
    transactional safety, or safe arbitrary SQL expressions.
+3a. `pg.table_typed_pk_constraints` adds allowlisted data-only
+   `UNIQUE` and `FOREIGN KEY` rendering. Inputs may only select
+   validated local and referenced identifiers; the builder rejects
+   duplicate/local-missing columns, mismatched FK arity, malformed or
+   repeated constraint specifications and quoted/qualified identifiers.
+   The target table and referenced key existence, target uniqueness,
+   permissions, lock behavior and application tenant authority are
+   **outside this planner**. Constraint arrays must not be shared/mutated
+   across actors during generation. This is an unexecuted draft; a real
+   PostgreSQL DDL/rollback test remains mandatory.
 4. `Query.sql` and `Query.params` are distinct but `params` is currently a
    mutable actor-local array. No cross-actor sharing, reuse after handoff,
    or assumption of a deep copy is allowed. The driver must implement owned,
