@@ -114,7 +114,13 @@ referenced column. This is a bounded subset of DDL, not arbitrary CHECK
 expressions or source-authored constraint SQL.
 
 The new constrained-table builder limits column count (64), PK arity (32),
-extra constraints (32) and local columns per constraint (32). It relies on
+extra constraints (32) and local columns per constraint (32).
+The new renderer emits complete DDL directly; additional positive fixtures
+assert unchanged PK-only SQL, ordered distinct UNIQUE/FK clauses, exact
+duplicate comparisons and copying of caller-owned constraint arrays.
+The `QueryPlan` fixtures test copied bound strings, mutation of legacy
+source arrays after snapshot creation and parameter index bounds. These
+new assertions are **authored, not executed by the native compiler**. It relies on
 the same conservatively admitted ASCII identifier path. A real PostgreSQL
 17 parse/execute test is required before claiming valid DDL or foreign-key
 behavior; the host reference golden cannot establish database validity.
