@@ -188,6 +188,9 @@ pub routine main(): void {
   let Array<string> unique_names = arr["code"];
   val unique_snapshot = pg.constraint_unique(unique_names);
   unique_names.set(0, "not_declared");
+  // A returned accessor array is also a defensive copy, not the internal store.
+  val returned_unique_names = unique_snapshot.local_columns();
+  returned_unique_names.set(0, "also_not_declared");
   val snap_unique_ddl = pg.table_typed_pk_constraints("docs", arr[
     pg.column_spec("id", "uuid", false),
     pg.column_spec("code", "text", false)
@@ -201,6 +204,10 @@ pub routine main(): void {
   val fk_snapshot = pg.constraint_foreign_key(local_fk_names, "workspaces", remote_fk_names);
   local_fk_names.set(0, "other_local");
   remote_fk_names.set(0, "other_remote");
+  val returned_fk_local = fk_snapshot.local_columns();
+  val returned_fk_remote = fk_snapshot.referenced_columns();
+  returned_fk_local.set(0, "returned_local_tamper");
+  returned_fk_remote.set(0, "returned_remote_tamper");
   val snap_fk_ddl = pg.table_typed_pk_constraints("docs", arr[
     pg.column_spec("id", "uuid", false)
   ], arr["id"], arr[fk_snapshot]);
