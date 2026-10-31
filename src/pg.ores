@@ -49,22 +49,37 @@ end
 // Data-only checked schema constraints: no SQL fragments.
 pub define class ConstraintSpec as
   pub val string kind;
-  pub val Array<string> columns;
+  val Array<string> saved_columns;
   pub val string reference_table;
-  pub val Array<string> reference_columns;
+  val Array<string> saved_reference_columns;
   pub constructor(string kind, Array<string> columns, string reference_table, Array<string> reference_columns) {
     self.kind = kind;
     let Array<string> local_snapshot = arr[];
     for (val local_name of columns) {
       local_snapshot.add(local_name);
     }
-    self.columns = local_snapshot;
+    self.saved_columns = local_snapshot;
     self.reference_table = reference_table;
     let Array<string> reference_snapshot = arr[];
     for (val reference_name of reference_columns) {
       reference_snapshot.add(reference_name);
     }
-    self.reference_columns = reference_snapshot;
+    self.saved_reference_columns = reference_snapshot;
+  }
+  // Never return the internal arrays. Read access returns a fresh local copy.
+  pub local_columns(): Array<string> {
+    let Array<string> copy = arr[];
+    for (val local_name of self.saved_columns) {
+      copy.add(local_name);
+    }
+    return copy;
+  }
+  pub referenced_columns(): Array<string> {
+    let Array<string> copy = arr[];
+    for (val reference_name of self.saved_reference_columns) {
+      copy.add(reference_name);
+    }
+    return copy;
   }
 end
 
@@ -185,15 +200,17 @@ define module pg as
     // Exact duplicate detection, never substring matching on rendered SQL.
     let Array<string> seen_clauses = arr[];
     for (val rule of constraints) {
+      val local_columns = rule.local_columns();
+      val reference_columns = rule.referenced_columns();
       if rule.kind != "unique" && rule.kind != "foreign_key" then
         return Err("unsupported PostgreSQL constraint kind");
       fi
-      if rule.columns.size == 0 || rule.columns.size > 32 then
+      if local_columns.size == 0 || local_columns.size > 32 then
         return Err("constraint requires 1 to 32 local columns");
       fi
       let string local_sql = "";
       let bool first_local = true;
-      for (val local_name of rule.columns) {
+      for (val local_name of local_columns) {
         if !admitted_identifier(local_name) then return Err("invalid constraint column identifier"); fi
         let bool declared = false;
         for (val column_decl of columns) {
@@ -201,7 +218,7 @@ define module pg as
         }
         if !declared then return Err("constraint column is not declared"); fi
         let bool seen = false;
-        for (val earlier of rule.columns) {
+        for (val earlier of local_columns) {
           if earlier == local_name then
             if seen then return Err("duplicate constraint column"); fi
             seen = true;
@@ -213,7 +230,7 @@ define module pg as
       }
       let string clause = "";
       if rule.kind == "unique" then
-        if rule.reference_table != "" || rule.reference_columns.size != 0 then
+        if rule.reference_table != "" || reference_columns.size != 0 then
           return Err("unique constraint cannot contain foreign-key fields");
         fi
         clause = "UNIQUE (" + local_sql + ")";
@@ -222,17 +239,17 @@ define module pg as
         if !admitted_identifier(rule.reference_table) then
           return Err("invalid referenced table identifier");
         fi
-        if rule.reference_columns.size != rule.columns.size then
+        if reference_columns.size != local_columns.size then
           return Err("foreign-key column arity mismatch");
         fi
         let string referenced_sql = "";
         let bool first_ref = true;
-        for (val referenced_name of rule.reference_columns) {
+        for (val referenced_name of reference_columns) {
           if !admitted_identifier(referenced_name) then
             return Err("invalid referenced column identifier");
           fi
           let bool seen_ref = false;
-          for (val other_ref of rule.reference_columns) {
+          for (val other_ref of reference_columns) {
             if other_ref == referenced_name then
               if seen_ref then return Err("duplicate referenced column"); fi
               seen_ref = true;
