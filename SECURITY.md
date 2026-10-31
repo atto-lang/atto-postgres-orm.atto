@@ -30,9 +30,10 @@ a scope and release-gating contract, not certification.
    repeated constraint specifications and quoted/qualified identifiers.
    The renderer composes the full statement directly (no terminator
    string replacement) and compares duplicate clauses exactly. The
-   `ConstraintSpec` constructor copies caller arrays; its public array
-   fields themselves remain mutable, so it is NOT Sendable and must stay
-   actor-local without concurrent mutation. Referenced key existence,
+   `ConstraintSpec` constructor copies caller arrays into private
+   fields. Both public read accessors return fresh arrays, preventing
+   source- and accessor-alias mutation. This is not an independently
+   verified cross-actor `Sendable` guarantee; objects stay actor-local. Referenced key existence,
    target uniqueness, permissions, lock behavior and tenant authority are
    **outside this planner**. This is unexecuted draft work; a real
    PostgreSQL DDL/rollback test remains mandatory.
