@@ -28,6 +28,38 @@ the generated model API nor the connection/driver API exists yet.
 - [Compile-fail, patch, relation and migration acceptance matrix](tests/DIESEL_SEAORM_ACCEPTANCE.md)
 - [Zod/Zorde/Serde/TypeORM/Prisma/Drizzle integration contract](docs/ORM_HARDENING_CONTRACT.md)
 
+## First typed bind / patch slice (native source, unexecuted)
+
+`src/pg.ores` now defines **data-only** `PgType`, `DbValue`,
+`FieldChange` and `TypedPatchPlan` classes plus checked factories and a
+single-column patch planner. Unlike the earlier `QueryPlan`, patch binds
+carry explicit type tags and an SQL NULL flag. The plan snapshots its
+actor-local bind array; a caller-provided value is never interpolated into
+SQL. `not_set` and `unchanged` return a no-op plan with **zero** binds,
+while `set` writes a separately bound value.
+
+Example (proposed guest syntax; **native compiler not yet executed**):
+
+```ores
+val doc_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+val tenant_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+val plan = pg.plan_update_field_checked("docs",
+  pg.column_spec("title", "text", false),
+  pg.change_set(pg.db_text("new title")), tenant_id, doc_id).unwrap();
+// plan.sql has $1::text/$2::uuid/$3::uuid placeholders.
+// plan.param_at(0).unwrap().kind == "text"; never execute via raw SQL.
+```
+
+This slice supports `text`, `uuid` and `boolean` bind tags, with
+canonical UUID syntax checking. Other declared `PgType` variants are not
+yet supported as patch-bind codecs. `PgType`, `DbValue` and `FieldChange`
+have public constructors, so planner admission revalidates their state.
+`ColumnSpec` is **not** a generated or authority-bearing schema descriptor;
+table/column strings are bounded by conservative identifier validation.
+`workspace_id` is only a checked UUID, **not** authenticated tenant
+authority. This is an **SQL planning layer only**, not a driver, PostgreSQL
+execution proof, completed Serde/Zorde adapters or compile-time checked DSL.
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and

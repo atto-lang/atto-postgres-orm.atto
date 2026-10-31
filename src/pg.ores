@@ -83,6 +83,66 @@ pub define class ConstraintSpec as
   }
 end
 
+// Data-only PostgreSQL type descriptor. This is not a catalog-authorized
+// schema token, and may be constructed directly by a caller. Validate at use.
+pub define class PgType as
+  pub val string name;
+  pub constructor(string name) {
+    self.name = name;
+  }
+end
+
+// Closed scalar bind representation for the first planning slice.
+// The text payload is a wire-codec input, NEVER a SQL fragment. This is not
+// a completed PostgreSQL protocol adapter and not a Sendable guarantee.
+pub define class DbValue as
+  pub val string kind;
+  pub val string text_value;
+  pub val bool is_null;
+  pub constructor(string kind, string text_value, bool is_null) {
+    self.kind = kind;
+    self.text_value = text_value;
+    self.is_null = is_null;
+  }
+end
+
+// Three distinct mutation intents. Unchanged and not_set produce no SQL.
+// A caller can construct invalid combinations, so planner must revalidate.
+pub define class FieldChange as
+  pub val string state;
+  pub val DbValue value;
+  pub constructor(string state, DbValue value) {
+    self.state = state;
+    self.value = value;
+  }
+end
+
+// Actor-local snapshot of typed bind values, with an explicit no-op status.
+// This data-only plan conveys neither tenant authority nor executable SQL.
+pub define class TypedPatchPlan as
+  pub val string sql;
+  pub val bool is_noop;
+  val Array<DbValue> saved_values;
+  pub constructor(string sql, bool is_noop, Array<DbValue> values) {
+    self.sql = sql;
+    self.is_noop = is_noop;
+    let Array<DbValue> copy = arr[];
+    for (val value of values) {
+      copy.add(value);
+    }
+    self.saved_values = copy;
+  }
+  pub param_count(): int {
+    return self.saved_values.size;
+  }
+  pub param_at(int index): Result<DbValue, string> {
+    if index < 0 || index >= self.saved_values.size then
+      return Err("typed patch parameter index out of bounds");
+    fi
+    return Ok(self.saved_values.get(index));
+  }
+end
+
 define module pg as
   // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
   // This is NOT full UTF-8 byte-length validation; legacy SQL methods
@@ -316,5 +376,124 @@ define module pg as
   pub fnc find_in_workspace(string table, string workspace, string id): Query {
     return new Query("SELECT * FROM " + ident(table)
       + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]);
+  }
+  // PgType is a bounded data descriptor. Runtime registry authorization and
+  // code-generated nominal schema types remain separately required.
+  pub fnc pg_type_checked(string kind): Result<PgType, string> {
+    if kind != "uuid" && kind != "text" && kind != "integer"
+      && kind != "bigint" && kind != "boolean" && kind != "jsonb"
+      && kind != "timestamptz" && kind != "bytea" then
+      return Err("unsupported PostgreSQL type descriptor");
+    fi
+    return Ok(new PgType(kind));
+  }
+  // Canonical 8-4-4-4-12 UUID syntax and ASCII hex only. No coercion.
+  // Host/driver must separately cap raw input bytes before allocations.
+  pub fnc uuid_hex_segment(string segment, int expected_chars): bool {
+    if segment == "" || segment.replace_literal("|", "") != segment then return false; fi
+    let string mapped = segment;
+    for (val digit of arr["0", "1", "2", "3", "4", "5", "6", "7", "8", "9",
+      "a", "b", "c", "d", "e", "f", "A", "B", "C", "D", "E", "F"]) {
+      mapped = mapped.replace_literal(digit, "|");
+    }
+    if mapped.replace_literal("|", "") != "" then return false; fi
+    return mapped.split_literal("|").size == expected_chars + 1;
+  }
+  pub fnc canonical_uuid(string raw): bool {
+    val segments = raw.split_literal("-");
+    if segments.size != 5 then return false; fi
+    return uuid_hex_segment(segments.get(0), 8)
+      && uuid_hex_segment(segments.get(1), 4)
+      && uuid_hex_segment(segments.get(2), 4)
+      && uuid_hex_segment(segments.get(3), 4)
+      && uuid_hex_segment(segments.get(4), 12);
+  }
+  // Factories are explicit; no implicit conversion from string to UUID.
+  pub fnc db_text(string value): DbValue {
+    return new DbValue("text", value, false);
+  }
+  pub fnc db_boolean(bool value): DbValue {
+    if value then return new DbValue("boolean", "true", false); fi
+    return new DbValue("boolean", "false", false);
+  }
+  pub fnc db_uuid_checked(string value): Result<DbValue, string> {
+    if !canonical_uuid(value) then return Err("noncanonical PostgreSQL UUID bind"); fi
+    return Ok(new DbValue("uuid", value, false));
+  }
+  pub fnc db_null_checked(string kind): Result<DbValue, string> {
+    if pg_type_checked(kind).is_err() then return Err("unsupported PostgreSQL NULL type"); fi
+    return Ok(new DbValue(kind, "", true));
+  }
+  // Reject malformed/forged public data descriptors at every planning entry.
+  // This slice binds text, uuid, boolean only; other PgTypes are not yet
+  // enabled by the codec and cannot silently be encoded as strings.
+  pub fnc admitted_db_value(DbValue value): bool {
+    if value.kind != "text" && value.kind != "uuid" && value.kind != "boolean" then
+      return false;
+    fi
+    if value.is_null then return value.text_value == ""; fi
+    if value.kind == "uuid" then return canonical_uuid(value.text_value); fi
+    if value.kind == "boolean" then
+      return value.text_value == "true" || value.text_value == "false";
+    fi
+    return true;
+  }
+  pub fnc change_not_set(): FieldChange {
+    return new FieldChange("not_set", db_text(""));
+  }
+  pub fnc change_unchanged(DbValue old_value): FieldChange {
+    return new FieldChange("unchanged", old_value);
+  }
+  pub fnc change_set(DbValue new_value): FieldChange {
+    return new FieldChange("set", new_value);
+  }
+  // For explicit SQL NULL use change_set(db_null_checked(kind).unwrap()).
+  // NotSet and Unchanged never imply a NULL write.
+  pub fnc plan_update_field_checked(
+    string table,
+    ColumnSpec field,
+    FieldChange change,
+    string workspace,
+    string id
+  ): Result<TypedPatchPlan, string> {
+    if !admitted_identifier(table) then return Err("unadmitted patch table"); fi
+    if !admitted_identifier(field.name) then return Err("unadmitted patch column"); fi
+    if field.name == "id" || field.name == "workspace_id" then
+      return Err("cannot patch primary key or tenant key");
+    fi
+    if pg_type_checked(field.kind).is_err() then return Err("unsupported patch column type"); fi
+    if field.kind != "text" && field.kind != "uuid" && field.kind != "boolean" then
+      return Err("patch type has no native bind codec yet");
+    fi
+    // These are checked values, NOT proof of authenticated tenant identity.
+    if !canonical_uuid(workspace) || !canonical_uuid(id) then
+      return Err("invalid patch workspace or record UUID");
+    fi
+    if change.state == "not_set" then
+      return Ok(new TypedPatchPlan("", true, arr[]));
+    fi
+    if change.state != "set" && change.state != "unchanged" then
+      return Err("invalid patch change state");
+    fi
+    if !admitted_db_value(change.value) || change.value.kind != field.kind then
+      return Err("patch bind type mismatch or invalid value");
+    fi
+    if change.value.is_null && !field.nullable then
+      return Err("NULL patch for nonnullable column");
+    fi
+    if change.state == "unchanged" then
+      return Ok(new TypedPatchPlan("", true, arr[]));
+    fi
+    val workspace_value = db_uuid_checked(workspace);
+    val id_value = db_uuid_checked(id);
+    if workspace_value.is_err() || id_value.is_err() then
+      return Err("invalid workspace or id bind");
+    fi
+    val sql = "UPDATE " + ident(table) + " SET " + ident(field.name)
+      + " = $1::" + field.kind
+      + " WHERE workspace_id = $2::uuid AND id = $3::uuid";
+    return Ok(new TypedPatchPlan(sql, false, arr[
+      change.value, workspace_value.unwrap(), id_value.unwrap()
+    ]));
   }
 end

@@ -275,6 +275,102 @@ pub routine main(): void {
   if owned_snapshot.param_at(1).unwrap() != "record-1" then
     panic("QueryPlan record parameter aliased source array");
   fi
+  // PgType and DbValue use a closed first-slice codec set. No driver exists.
+  if pg.pg_type_checked("uuid").unwrap().name != "uuid" then
+    panic("typed PostgreSQL type descriptor");
+  fi
+  if !pg.pg_type_checked("text); DROP TABLE docs; --").is_err() then
+    panic("raw SQL type admitted into PgType");
+  fi
+  val uuid_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  val uuid_b = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+  if !pg.canonical_uuid(uuid_a) then panic("valid canonical UUID rejected"); fi
+  if !pg.canonical_uuid("abc") then panic("short UUID admitted"); fi
+  if !pg.canonical_uuid("gggggggg-aaaa-aaaa-aaaa-aaaaaaaaaaaa") then
+    panic("nonhex UUID admitted");
+  fi
+  if !pg.canonical_uuid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaé") then
+    panic("Unicode UUID admitted");
+  fi
+  if !pg.db_uuid_checked("bad").is_err() then panic("string to UUID coerced"); fi
+  if !pg.db_null_checked("text;--").is_err() then panic("raw NULL type admitted"); fi
+  if !pg.admitted_db_value(pg.db_boolean(true)) then panic("boolean codec rejected"); fi
+  if pg.admitted_db_value(new DbValue("boolean", "maybe", false)) then
+    panic("forged boolean admitted");
+  fi
+  val note_field = pg.column_spec("note", "text", true);
+  val required_field = pg.column_spec("title", "text", false);
+  val typed_write = pg.plan_update_field_checked("docs", required_field,
+    pg.change_set(pg.db_text("new' OR true--")), uuid_a, uuid_b);
+  if typed_write.is_err() then panic("typed patch rejected safe bind"); fi
+  if typed_write.unwrap().is_noop then panic("set patch marked no-op"); fi
+  if typed_write.unwrap().sql !=
+    "UPDATE \"docs\" SET \"title\" = $1::text WHERE workspace_id = $2::uuid AND id = $3::uuid" then
+    panic("typed patch SQL changed");
+  fi
+  if typed_write.unwrap().param_count() != 3 then panic("typed patch arity"); fi
+  if typed_write.unwrap().param_at(0).unwrap().text_value != "new' OR true--" then
+    panic("SQL payload interpolated instead of bound");
+  fi
+  if typed_write.unwrap().param_at(1).unwrap().kind != "uuid" then
+    panic("workspace bind missing UUID tag");
+  fi
+  if !typed_write.unwrap().param_at(-1).is_err() then
+    panic("negative patch bind offset admitted");
+  fi
+  if !typed_write.unwrap().param_at(3).is_err() then
+    panic("oversized patch bind offset admitted");
+  fi
+  val omitted = pg.plan_update_field_checked("docs", note_field,
+    pg.change_not_set(), uuid_a, uuid_b);
+  if omitted.is_err() || !omitted.unwrap().is_noop || omitted.unwrap().param_count() != 0 then
+    panic("NotSet must not write or bind");
+  fi
+  val unchanged = pg.plan_update_field_checked("docs", required_field,
+    pg.change_unchanged(pg.db_text("old")), uuid_a, uuid_b);
+  if unchanged.is_err() || !unchanged.unwrap().is_noop then
+    panic("Unchanged must not write");
+  fi
+  val explicit_null = pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_null_checked("text").unwrap()), uuid_a, uuid_b);
+  if explicit_null.is_err() || explicit_null.unwrap().is_noop then
+    panic("nullable SQL NULL rejected");
+  fi
+  if !explicit_null.unwrap().param_at(0).unwrap().is_null then
+    panic("SQL NULL lost its explicit tag");
+  fi
+  if !pg.plan_update_field_checked("docs", required_field,
+    pg.change_set(pg.db_null_checked("text").unwrap()), uuid_a, uuid_b).is_err() then
+    panic("nonnullable SQL NULL admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("id", "uuid", false),
+    pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()), uuid_a, uuid_b).is_err() then
+    panic("primary key patch admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("workspace_id", "uuid", false),
+    pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()), uuid_a, uuid_b).is_err() then
+    panic("tenant key patch admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_boolean(false)), uuid_a, uuid_b).is_err() then
+    panic("mismatched patch type admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", note_field,
+    new FieldChange("wrong", pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("forged patch change state admitted");
+  fi
+  if !pg.plan_update_field_checked("docs; DELETE", note_field,
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("injected patch table admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("note; DELETE", "text", true),
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("injected patch column admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_text("x")), "not-a-uuid", uuid_b).is_err() then
+    panic("unvalidated tenant UUID admitted");
+  fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }

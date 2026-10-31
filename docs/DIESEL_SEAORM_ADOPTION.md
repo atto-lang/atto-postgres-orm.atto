@@ -86,3 +86,20 @@ See `tests/DIESEL_SEAORM_ACCEPTANCE.md` for positive, negative, compile-fail, an
 - SeaORM 2.0 relations / model loading: https://www.sea-ql.org/SeaORM/docs/index/
 - SeaORM 2.0 transactions: https://www.sea-ql.org/SeaORM/docs/advanced-query/transaction/
 - SeaORM 2.0 release: https://www.sea-ql.org/blog/2026-07-27-sea-orm-2.0/
+
+## 2026-10-31 first native source slice
+
+`src/pg.ores` now contains a conservative `PgType` factory and
+`DbValue(kind,text_value,is_null)` bound-scalar container. The patch
+planner `plan_update_field_checked` checks table and field identifiers,
+only admits text/uuid/boolean codecs, validates canonical UUID inputs,
+revalidates forged class instances, rejects changes to `id` and
+`workspace_id`, and binds data without interpolation.
+
+The non-generic `FieldChange` carries `not_set`, `unchanged`, or `set`.
+Only `set` emits SQL; an explicit SQL NULL is represented by a distinct
+`DbValue` flag and rejected for nonnullable fields. This deliberately
+falls short of a generated compile-time `Change<T>`, `PgType` enum, AOT
+schema capability, or complete wire codec. Typed schema generation,
+connection-generation fencing, actual PostgreSQL bind OIDs, and integration
+evidence remain future work. The guest fixtures are **not yet executed**.
