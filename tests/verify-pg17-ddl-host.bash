@@ -36,7 +36,7 @@ check_reject missing-dsn
 export PG_TEST_DSN='postgresql://test@disposable/db'
 [[ "$(bash "$script")" == PG_DDL_CONTRACT_SQL_ONLY_PASS:* ]] ||
   { echo 'HOST_DDL_MOCK_FAIL: expected mock pass' >&2; exit 1; }
-for marker in 'BEGIN;' 'CREATE SCHEMA :"contract_schema";' 'UNIQUE ("workspace_id", "external_id")' 'FOREIGN KEY ("workspace_id") REFERENCES "workspaces" ("id")' 'WHEN unique_violation' 'WHEN foreign_key_violation' 'WHEN not_null_violation' 'ROLLBACK;' 'SELECT count(*) FROM pg_namespace'; do
+for marker in 'BEGIN;' "current_setting('server_version_num')" 'CREATE SCHEMA :"contract_schema";' 'UNIQUE ("workspace_id", "external_id")' 'FOREIGN KEY ("workspace_id") REFERENCES "workspaces" ("id")' 'WHEN unique_violation' 'WHEN foreign_key_violation' 'WHEN not_null_violation' 'ROLLBACK;' 'SELECT count(*) FROM pg_namespace'; do
   grep -Fq "$marker" "$work/input.sql" || { echo "HOST_DDL_MOCK_FAIL: missing SQL guard $marker" >&2; exit 1; }
 done
 printf '%s\n' 'HOST_DDL_MOCK_CASE=normal-mock PASS'
