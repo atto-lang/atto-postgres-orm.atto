@@ -34,6 +34,44 @@ pub define class QueryPlan as
   }
 end
 
+// Execution-oriented bind value metadata. No binary wire encoding exists yet.
+// Constructors are public: the future driver MUST call pg.admitted_db_value()
+// when accepting an externally constructed value or plan.
+pub define class DbValue as
+  pub val string kind;
+  pub val string scalar;
+  pub val bool is_null;
+  pub constructor(string kind, string scalar, bool is_null) {
+    self.kind = kind;
+    self.scalar = scalar;
+    self.is_null = is_null;
+  }
+end
+
+// A defensive, actor-local snapshot of typed values. It is NOT a connection
+// capability, a Sendable value, or proof that SQL is trusted.
+pub define class TypedQueryPlan as
+  pub val string sql;
+  val Array<DbValue> saved_values;
+  pub constructor(string sql, Array<DbValue> values) {
+    self.sql = sql;
+    let Array<DbValue> copy = arr[];
+    for (val value of values) {
+      copy.add(value);
+    }
+    self.saved_values = copy;
+  }
+  pub param_count(): int {
+    return self.saved_values.size;
+  }
+  pub param_at(int index): Result<DbValue, string> {
+    if index < 0 || index >= self.saved_values.size then
+      return Err("typed parameter index out of bounds");
+    fi
+    return Ok(self.saved_values.get(index));
+  }
+end
+
 // Data-only inputs for the checked primary-key table builder. Never store SQL here.
 pub define class ColumnSpec as
   pub val string name;
@@ -315,5 +353,42 @@ define module pg as
   pub fnc find_in_workspace(string table, string workspace, string id): Query {
     return new Query("SELECT * FROM " + ident(table)
       + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]);
+  }
+  // This is a tag/value admission check, NOT a UUID or JSON parser.
+  // A future driver must check again at its own trust boundary and enforce
+  // byte caps, PostgreSQL type coercion and binary/text wire encoding.
+  pub fnc admitted_db_value(DbValue value): bool {
+    if value.kind != "uuid" && value.kind != "text" && value.kind != "integer"
+      && value.kind != "bigint" && value.kind != "boolean"
+      && value.kind != "jsonb" && value.kind != "timestamptz"
+      && value.kind != "bytea" then
+      return false;
+    fi
+    // Null has no scalar payload; otherwise empty strings are significant.
+    if value.is_null && value.scalar != "" then return false; fi
+    return true;
+  }
+  pub fnc checked_db_value(string kind, string scalar, bool is_null): Result<DbValue, string> {
+    val value = new DbValue(kind, scalar, is_null);
+    if !admitted_db_value(value) then return Err("unadmitted PostgreSQL bind value"); fi
+    return Ok(value);
+  }
+  // Only a vetted fixed SQL template is exported here: caller data stays
+  // in the two typed bind slots and never affects SQL text. Workspace data
+  // does NOT authenticate the caller; a future driver must enforce tenant
+  // capability, role, and database RLS independently.
+  pub fnc find_in_workspace_typed_plan_checked(
+    string table, string workspace, string id
+  ): Result<TypedQueryPlan, string> {
+    if !admitted_identifier(table) then
+      return Err("unadmitted PostgreSQL query table identifier");
+    fi
+    let Array<DbValue> binds = arr[
+      new DbValue("uuid", workspace, false),
+      new DbValue("uuid", id, false)
+    ];
+    return Ok(new TypedQueryPlan(
+      "SELECT * FROM " + ident(table)
+        + " WHERE workspace_id = $1::uuid AND id = $2::uuid", binds));
   }
 end
