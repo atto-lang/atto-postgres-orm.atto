@@ -184,6 +184,32 @@ pub routine main(): void {
     pg.constraint_foreign_key(arr["id", "code"], "workspaces", arr["id", "id"])
   ]).is_err() then panic("duplicate foreign referenced columns admitted"); fi
 
+  // QueryPlan hides its copied Array and exposes only typed scalar reads.
+  val checked_plan = pg.find_in_workspace_plan_checked("runs", "tenant-a", "run-1");
+  if checked_plan.is_err() then panic("checked plan rejected admitted table"); fi
+  if checked_plan.unwrap().sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then
+    panic("checked plan SQL changed");
+  fi
+  if checked_plan.unwrap().param_count() != 2 then panic("checked plan parameter count"); fi
+  if checked_plan.unwrap().param_at(0).unwrap() != "tenant-a" then panic("checked plan tenant bind"); fi
+  if checked_plan.unwrap().param_at(1).unwrap() != "run-1" then panic("checked plan record bind"); fi
+  if !checked_plan.unwrap().param_at(-1).is_err() then panic("negative parameter index admitted"); fi
+  if !checked_plan.unwrap().param_at(2).is_err() then panic("out-of-range parameter index admitted"); fi
+  if !pg.find_in_workspace_plan_checked("schema.runs", "w", "i").is_err() then
+    panic("unchecked qualified table admitted to QueryPlan");
+  fi
+  // Prove actual copy-on-admission: changing the legacy array cannot mutate
+  // the new plan's private parameter snapshot.
+  val legacy_query = pg.find_in_workspace("runs", "original-workspace", "record-1");
+  val owned_snapshot = pg.snapshot_legacy_query(legacy_query);
+  legacy_query.params.set(0, "tampered-workspace");
+  legacy_query.params.set(1, "tampered-record");
+  if owned_snapshot.param_at(0).unwrap() != "original-workspace" then
+    panic("QueryPlan tenant parameter aliased source array");
+  fi
+  if owned_snapshot.param_at(1).unwrap() != "record-1" then
+    panic("QueryPlan record parameter aliased source array");
+  fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
