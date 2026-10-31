@@ -17,6 +17,8 @@ fixture="$root/tests/plans.ores"
 [[ -f "$fixture" ]] || fail 'native plan fixture missing'
 expected='CREATE TABLE \"docs\" (\n  \"workspace_id\" uuid NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"external_id\" text NOT NULL,\n  PRIMARY KEY (\"workspace_id\", \"id\"),\n  UNIQUE (\"workspace_id\", \"external_id\"),\n  FOREIGN KEY (\"workspace_id\") REFERENCES \"workspaces\" (\"id\")\n);\n'
 grep -Fq -- "$expected" "$fixture" || fail 'authored Oreslang DDL golden has drifted'
+server_version="$(psql -X -q -A -t -v ON_ERROR_STOP=1 "$PG_TEST_DSN" -c 'SHOW server_version_num' 2>&1)" || fail 'PostgreSQL version probe failed'
+[[ "$server_version" =~ ^17[0-9]{4}$ ]] || fail 'PostgreSQL 17 server required'
 
 # A new, random, bounded simple-ASCII schema name per invocation. All changes
 # remain inside a transaction that ends with ROLLBACK; an error disconnects and
