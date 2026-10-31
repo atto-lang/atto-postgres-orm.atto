@@ -117,10 +117,15 @@ define module pg as
   // characters to a delimiter then count split components.
   pub fnc admitted_identifier(string name): bool {
     if !name.is_identifier() then return false; fi
+    // The delimiter must never originate in caller input.
+    if name.replace_literal("|", "") != name then return false; fi
     let string mapped = name;
     for (val letter of arr["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"]) {
       mapped = mapped.replace_literal(letter, "|");
     }
+    // Every original byte must have been admitted by the ASCII whitelist.
+    // is_identifier() alone may recognize Unicode identifiers.
+    if mapped.replace_literal("|", "") != "" then return false; fi
     return mapped.split_literal("|").size <= 64;
   }
   pub fnc column_spec(string name, string kind, bool nullable): ColumnSpec {
