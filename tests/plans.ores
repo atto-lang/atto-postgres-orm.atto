@@ -15,7 +15,8 @@ pub routine main(): void {
   if ddl != "CREATE TABLE \"safe\"\"name\" (\n  \"x\" bytea NOT NULL,\n  PRIMARY KEY (\"x\")\n);\n" then panic("DDL identifier quoting"); fi
   val hostile_table = pg.find_in_workspace("runs\" JOIN secret ON true --", "w", "i");
   if hostile_table.sql != "SELECT * FROM \"runs\"\" JOIN secret ON true --\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query table quoting"); fi
-  if hostile_table.params.get(0) != "w" || hostile_table.params.get(1) != "i" then panic("bind/SQL separation"); fi
+  if hostile_table.params.get(0) != "w" then panic("workspace bind/SQL separation"); fi
+  if hostile_table.params.get(1) != "i" then panic("id bind/SQL separation"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
