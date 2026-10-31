@@ -167,3 +167,28 @@ hashes that fourth guest's input. These source-level checks were inspected,
 but the modified native/host guest suite has not been executed at this head.
 Legacy quoted identifiers still lack complete PostgreSQL 63-byte UTF-8
 validation and remain **trusted-only**.
+
+### PostgreSQL 17 rollback-only SQL contract (independent of the Oreslang guest)
+
+`tests/pg17-ddl-contract.bash` executes the typed-constraint fixture's
+canonical `CREATE TABLE "docs"` SQL against an **explicitly disposable**
+PostgreSQL database. It asserts UNIQUE, foreign-key, NOT NULL, composite
+primary-key enforcement, executes `ROLLBACK`, and checks the ephemeral schema
+was not retained. It fails before connecting unless the native fixture still
+contains the same SQL golden and the caller provides both opt-in variables:
+
+```sh
+PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE \
+PG_TEST_DSN='postgresql://test-user:password@localhost:5432/disposable_db' \
+bash tests/pg17-ddl-contract.bash
+```
+
+The `pg17-ddl-integration.yml` workflow provisions a disposable PostgreSQL 17
+service when Actions runners are admitted. The `pg-host-verifier.yml` workflow
+runs `bash tests/verify-pg17-ddl-host.bash` with fake `psql`, testing fail-closed
+admission and rollback-output checks. The latter suite passed **5/5 local
+host/mock scenarios** against byte-verified GitHub blobs. **No live PostgreSQL
+server, native Oreslang compiler or real driver was executed locally**, and a
+zero-step GitHub job cannot count as execution. This SQL-only test does not
+authenticate tenants or establish RLS, migrations, driver correctness, or
+cross-backend parity.
