@@ -45,16 +45,30 @@ define module pg as
     return Ok(sql);
   }
   // Factory keeps callers independent of ColumnSpec module-export conventions.
+  // Safe typed-DDL identifier subset: ASCII only, length 1..63 bytes.
+  // is_identifier rejects quotes, controls, Unicode and qualification.
+  // It restricts input to ASCII, so each character is exactly one UTF-8 byte.
+  // The pinned compiler exposes no string byte-length API; map admitted
+  // characters to a delimiter then count split components.
+  pub fnc admitted_identifier(string name): bool {
+    if !name.is_identifier() then return false; fi
+    let string mapped = name;
+    for (val letter of arr["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"]) {
+      mapped = mapped.replace_literal(letter, "|");
+    }
+    return mapped.split_literal("|").length <= 64;
+  }
   pub fnc column_spec(string name, string kind, bool nullable): ColumnSpec {
     return new ColumnSpec(name, kind, nullable);
   }
   // A limited typed DDL path: only allowlisted column types and PRIMARY KEY.
   // This is SQL planning, NOT a driver, identifier-admission or RLS boundary.
   pub fnc table_typed_pk(string name, Array<ColumnSpec> columns, Array<string> key_columns): Result<string, string> {
-    if invalid_identifier_surface(name) then return Err("invalid PostgreSQL table identifier"); fi
+    if !admitted_identifier(name) then return Err("unadmitted PostgreSQL table identifier"); fi
     let string sql = "CREATE TABLE " + ident(name) + " (";
     let bool first = true;
     for (val spec of columns) {
+      if !admitted_identifier(spec.name) then return Err("unadmitted PostgreSQL column identifier"); fi
       val rendered = column(spec.name, spec.kind, spec.nullable);
       if rendered.is_err() then return Err("invalid PostgreSQL column definition"); fi
       let bool seen = false;
@@ -72,7 +86,7 @@ define module pg as
     let bool first_key = true;
     let string keys = "PRIMARY KEY (";
     for (val key of key_columns) {
-      if key == "" then return Err("empty PostgreSQL primary-key identifier"); fi
+      if !admitted_identifier(key) then return Err("unadmitted PostgreSQL primary-key identifier"); fi
       let bool found = false;
       for (val spec of columns) {
         if spec.name == key then
