@@ -21,14 +21,21 @@ pub define class ColumnSpec as
 end
 
 define module pg as
+  // Deliberately partial admission. The driver must still verify every C0,
+  // NUL and PostgreSQL's UTF-8 identifier byte limit before execution.
+  pub fnc invalid_identifier_surface(string name): bool {
+    return name == ""
+      || name.replace_literal("\\n", "") != name
+      || name.replace_literal("\\r", "") != name
+      || name.replace_literal("\\t", "") != name;
+  }
   pub fnc ident(string name): string {
-    // An empty PostgreSQL identifier is not a valid table or column name.
-    // Do not generate SQL that only fails after reaching the driver.
-    if name == "" then panic("empty PostgreSQL identifier"); fi
+    // Legacy string API panics on bad surface; typed builders return Err.
+    if invalid_identifier_surface(name) then panic("invalid PostgreSQL identifier surface"); fi
     return "\"" + name.replace_literal("\"", "\"\"") + "\"";
   }
   pub fnc column(string name, string kind, bool nullable): Result<string, string> {
-    if name == "" then return Err("empty PostgreSQL column identifier"); fi
+    if invalid_identifier_surface(name) then return Err("invalid PostgreSQL column identifier"); fi
     if kind != "uuid" && kind != "text" && kind != "integer" && kind != "bigint"
       && kind != "boolean" && kind != "jsonb" && kind != "timestamptz" && kind != "bytea" then
       return Err("unsupported PostgreSQL type");
@@ -44,7 +51,7 @@ define module pg as
   // A limited typed DDL path: only allowlisted column types and PRIMARY KEY.
   // This is SQL planning, NOT a driver, identifier-admission or RLS boundary.
   pub fnc table_typed_pk(string name, Array<ColumnSpec> columns, Array<string> key_columns): Result<string, string> {
-    if name == "" then return Err("empty PostgreSQL table identifier"); fi
+    if invalid_identifier_surface(name) then return Err("invalid PostgreSQL table identifier"); fi
     let string sql = "CREATE TABLE " + ident(name) + " (";
     let bool first = true;
     for (val spec of columns) {
