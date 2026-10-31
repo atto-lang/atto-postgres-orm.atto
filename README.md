@@ -47,6 +47,36 @@ policy to workspace-query table names and returns `Result<Query,string>`. It
 still exposes an actor-local mutable parameter array and does not validate
 workspace membership. The legacy `find_in_workspace` remains for compatibility.
 
+### Typed UNIQUE and FOREIGN KEY constraints (draft; guest execution pending)
+
+`table_typed_pk_constraints` extends `table_typed_pk` with data-only
+`ConstraintSpec` nodes. Use `constraint_unique` and
+`constraint_foreign_key` factories; no SQL expression strings are accepted:
+
+```ores
+val ddl = pg.table_typed_pk_constraints("docs", arr[
+  pg.column_spec("workspace_id", "uuid", false),
+  pg.column_spec("id", "uuid", false),
+  pg.column_spec("external_id", "text", false)
+], arr["workspace_id", "id"], arr[
+  pg.constraint_unique(arr["workspace_id", "external_id"]),
+  pg.constraint_foreign_key(arr["workspace_id"], "workspaces", arr["id"])
+]);
+```
+
+The builder checks identifier admission, local-column existence, local and
+referenced duplicate columns, FK arity, unknown constraint kinds, and duplicate
+rendered constraints. It limits each constraint to 1–32 local columns and
+each table to 32 additional constraints. Remote table/column existence,
+unique-index suitability and cross-schema ownership **cannot be verified
+without a database**; PostgreSQL must validate them during DDL execution.
+There are no raw CHECK expressions, arbitrary referential actions, deferrable
+modes or custom SQL names in this restricted surface. The rule arrays are
+data-only and must remain actor-local during synchronous planning.
+
+This newly authored code and fixtures have **not** been compiled or executed
+by the pinned native Oreslang compiler. They are not release evidence.
+
 **This does not establish safe database execution.** SQL names, even
 admitted names, are not tenant authority. Other constraints, capabilities,
 connection drivers, transactions, RLS and live PostgreSQL tests remain release
