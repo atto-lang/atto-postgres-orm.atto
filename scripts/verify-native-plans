@@ -106,7 +106,7 @@ run_guest() {
   [[ "$outcome" == PASS ]] || fail "guest oracle failed for $label (exit $rc)"
 }
 run_guest positive tests/plans.ores positive
-run_guest empty-identifier tests/negative/empty_identifier.ores 'empty PostgreSQL identifier'
+run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'
 run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'
 printf 'VERIFIED: three native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
 cat "$evidence/RESULT.txt"
