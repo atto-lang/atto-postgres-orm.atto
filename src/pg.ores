@@ -75,9 +75,33 @@ define module pg as
   pub fnc column_spec(string name, string kind, bool nullable): ColumnSpec {
     return new ColumnSpec(name, kind, nullable);
   }
-  // A limited typed DDL path: only allowlisted column types and PRIMARY KEY.
-  // This is SQL planning, NOT a driver, identifier-admission or RLS boundary.
+  // Compatibility: one shared typed renderer owns all PostgreSQL DDL output.
+  // The no-extra-constraint path retains the original SQL byte-for-byte.
   pub fnc table_typed_pk(string name, Array<ColumnSpec> columns, Array<string> key_columns): Result<string, string> {
+    return table_typed_pk_constraints(name, columns, key_columns, arr[]);
+  }
+  // Data-only factories. The constructor remains publicly accessible, so
+  // table_typed_pk_constraints must independently validate every field.
+  pub fnc constraint_unique(Array<string> columns): ConstraintSpec {
+    return new ConstraintSpec("unique", columns, "", arr[]);
+  }
+  pub fnc constraint_foreign_key(Array<string> columns, string reference_table, Array<string> reference_columns): ConstraintSpec {
+    return new ConstraintSpec("foreign_key", columns, reference_table, reference_columns);
+  }
+  // One direct, deterministic renderer owns typed PK, UNIQUE and FK output.
+  // No string surgery on completed SQL and no caller-provided SQL fragments.
+  // Inputs remain actor-local during synchronous planning; Array fields are
+  // not immutable snapshots and cannot yet cross actor/driver boundaries.
+  pub fnc table_typed_pk_constraints(
+    string name,
+    Array<ColumnSpec> columns,
+    Array<string> key_columns,
+    Array<ConstraintSpec> constraints
+  ): Result<string, string> {
+    // Bound the quadratic duplicate checks before constructing any SQL.
+    if columns.size > 64 then return Err("too many PostgreSQL table columns"); fi
+    if key_columns.size > 32 then return Err("too many PostgreSQL primary-key columns"); fi
+    if constraints.size > 32 then return Err("too many PostgreSQL table constraints"); fi
     if !admitted_identifier(name) then return Err("unadmitted PostgreSQL table identifier"); fi
     let string sql = "CREATE TABLE " + ident(name) + " (";
     let bool first = true;
@@ -121,31 +145,8 @@ define module pg as
       first_key = false;
     }
     if first_key then return Err("PostgreSQL primary key requires at least one column"); fi
-    return Ok(sql + ",\n  " + keys + ")\n);\n");
-  }
-  // Data-only factories. The constructor remains publicly accessible, so
-  // table_typed_pk_constraints must independently validate every field.
-  pub fnc constraint_unique(Array<string> columns): ConstraintSpec {
-    return new ConstraintSpec("unique", columns, "", arr[]);
-  }
-  pub fnc constraint_foreign_key(Array<string> columns, string reference_table, Array<string> reference_columns): ConstraintSpec {
-    return new ConstraintSpec("foreign_key", columns, reference_table, reference_columns);
-  }
-  // Extend the checked PK builder with UNIQUE / REFERENCES, with no raw SQL.
-  // This deterministic renderer processes only the validated fixed-format
-  // result of table_typed_pk; no caller-provided SQL text is spliced in.
-  pub fnc table_typed_pk_constraints(
-    string name,
-    Array<ColumnSpec> columns,
-    Array<string> key_columns,
-    Array<ConstraintSpec> constraints
-  ): Result<string, string> {
-    // Bound the quadratic duplicate checks before constructing any SQL.
-    if columns.size > 64 then return Err("too many PostgreSQL table columns"); fi
-    if key_columns.size > 32 then return Err("too many PostgreSQL primary-key columns"); fi
-    val base = table_typed_pk(name, columns, key_columns);
-    if base.is_err() then return Err("invalid base typed PostgreSQL table"); fi
-    if constraints.size > 32 then return Err("too many PostgreSQL table constraints"); fi
+    // The common PK header remains open for additional typed constraints.
+    let string sql_body = sql + ",\n  " + keys + ")";
     let string extra = "";
     for (val rule of constraints) {
       if rule.kind != "unique" && rule.kind != "foreign_key" then
@@ -214,8 +215,8 @@ define module pg as
       fi
       extra = extra + ",\n  " + clause;
     }
-    if extra == "" then return base; fi
-    return Ok(base.unwrap().replace_literal("\n);\n", extra + "\n);\n"));
+    // Emit exactly one terminator, with no replacement in already-rendered SQL.
+    return Ok(sql_body + extra + "\n);\n");
   }
   // Legacy trusted-SQL escape hatch: never admit user-supplied SQL fragments.
   pub fnc table(string name, Array<string> columns, Array<string> trusted_constraints): string {
