@@ -174,7 +174,7 @@ validation and remain **trusted-only**.
 canonical `CREATE TABLE "docs"` SQL against an **explicitly disposable**
 PostgreSQL database. It asserts UNIQUE, foreign-key, NOT NULL, composite
 primary-key enforcement, executes `ROLLBACK`, and checks the ephemeral schema
-was not retained. Before running SQL it verifies the actual server's `server_version_num` is PostgreSQL 17 (not merely the local client version). It fails before connecting unless the native fixture still
+was not retained. Before running SQL it verifies the actual server's `server_version_num` is PostgreSQL 17 (not merely the local client version), and repeats the PostgreSQL 17 assertion inside the DDL transaction. It fails before connecting unless the native fixture still
 contains the same SQL golden and the caller provides both opt-in variables:
 
 ```sh
