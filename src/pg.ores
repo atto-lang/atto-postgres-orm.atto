@@ -148,6 +148,8 @@ define module pg as
     // The common PK header remains open for additional typed constraints.
     let string sql_body = sql + ",\n  " + keys + ")";
     let string extra = "";
+    // Exact duplicate detection, never substring matching on rendered SQL.
+    let Array<string> seen_clauses = arr[];
     for (val rule of constraints) {
       if rule.kind != "unique" && rule.kind != "foreign_key" then
         return Err("unsupported PostgreSQL constraint kind");
@@ -209,10 +211,11 @@ define module pg as
         clause = "FOREIGN KEY (" + local_sql + ") REFERENCES "
           + ident(rule.reference_table) + " (" + referenced_sql + ")";
       fi
-      // Duplicate constraints would generate redundant or conflicting DDL.
-      if extra.contains_literal(",\n  " + clause) then
-        return Err("duplicate PostgreSQL constraint");
-      fi
+      // Compare complete clauses: prefix/substring matching is not identity.
+      for (val prior_clause of seen_clauses) {
+        if prior_clause == clause then return Err("duplicate PostgreSQL constraint"); fi
+      }
+      seen_clauses.add(clause);
       extra = extra + ",\n  " + clause;
     }
     // Emit exactly one terminator, with no replacement in already-rendered SQL.
