@@ -1,0 +1,17 @@
+name: Source-free runner admission canary (not a test)
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/runner-admission-canary.yml'
+  workflow_dispatch:
+permissions: {}
+jobs:
+  runner-admission-only:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - name: Confirm an actual step executed
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf 'RUNNER_ADMISSION_ONLY no source checkout, compiler, database, or test evidence\n'
