@@ -48,7 +48,7 @@ now matches the authored panic string.
 
 To prevent future drift, the host mock-suite first checks that both
 verifier diagnostics match explicit `panic(...)` strings in
-`src/pg.ores`, and that both negative fixtures call their intended
+`src/pg.ores`, and that both earlier negative fixtures call their intended
 operations. The wrong-diagnostic case must fail closed.
 
 **Executed host-only evidence:** exact reconstructed verifier Git blob
@@ -95,6 +95,24 @@ recent admission-focused runs in Zed/Scintilla/Akrion also had no
 executed steps. These runs do not reveal the exact billing/policy
 reason; **no private ORM tree has been transferred**. See issue #7.
 
+### 2026-10-31 C0/DEL incremental fixture extension
+
+`invalid_identifier_surface` now enumerates **32 C0 characters plus DEL**
+in `src/pg.ores`, with an independent 33-value positive guest catalog.
+A separate `control_identifier` negative guest emits its own start marker
+before calling `pg.ident("bad\\u0001name")`. The verifier now runs and
+hashes **four** guest input files, not three. The mock verifier has four
+fake guest responses and expects four outcomes plus the TSV header;
+its scenario count remains ten.
+
+A source-level cross-file audit confirmed **14/14 control catalog,
+fixture, verifier, and mock-harness invariants**, with all 33 distinct
+control values in both independent catalogs. The **newly modified host
+suite and native guest have not been executed** at this head. The earlier
+10/10 host mock PASS cited above pertains to preceding verifier/mock
+blobs, not this revision. The isolated JDK25 compiler and PostgreSQL
+integration remain unexecuted.
+
 ## One-command native execution gate
 
 From a clean checkout of this exact PR head, on an authorized machine with
@@ -121,7 +139,7 @@ compiled classes, launcher, Maven runtime dependencies and guest inputs.
 The evidence directory is created **outside** this repo by default and records
 raw process output, exit statuses, exact commands, source/compiler tree identity,
 compiled-artifact and dependency hashes. It writes `VERIFIED` to
-`RESULT.txt` **only after all three separate native guest processes pass**.
+`RESULT.txt` **only after all four separate native guest processes pass**.
 A `NOT_VERIFIED` result is never a compiler or PostgreSQL test pass, and
 harness-generated receipts remain subordinate to independent executed CI job
 steps and logs. The script never accesses a PostgreSQL server or proves RLS.
@@ -140,6 +158,7 @@ message contained the desired string.
 | `tests/plans.ores` | positive execution | `tests/plans.ores` | Exit 0 and exact stdout line `Postgres SQL planning contracts passed` |
 | `tests/negative/empty_identifier.ores` | negative execution | `tests/negative/empty_identifier.ores` | Nonzero guest exit, exact stdout sentinel `PG_NEGATIVE_EMPTY_IDENTIFIER_STARTED` and error diagnostic; no query SQL output |
 | `tests/negative/empty_table.ores` | negative execution | `tests/negative/empty_table.ores` | Nonzero guest exit, exact stdout sentinel `PG_NEGATIVE_EMPTY_TABLE_STARTED` and error diagnostic; no CREATE TABLE output |
+| `tests/negative/control_identifier.ores` | negative execution | `tests/negative/control_identifier.ores` | Nonzero guest exit, exact stdout sentinel `PG_NEGATIVE_CONTROL_IDENTIFIER_STARTED` and `invalid PostgreSQL identifier surface` on stderr; no SQL output |
 
 Each invocation has the form `ORESLANG_SOURCE_DIR=/ABSOLUTE/AUTHORIZED/oreslang-source.java ./scripts/ores <suffix>`.
 Use separate processes for negative fixtures to avoid catching/relabeling a
