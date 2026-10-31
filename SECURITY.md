@@ -28,15 +28,23 @@ a scope and release-gating contract, not certification.
    validated local and referenced identifiers; the builder rejects
    duplicate/local-missing columns, mismatched FK arity, malformed or
    repeated constraint specifications and quoted/qualified identifiers.
-   The target table and referenced key existence, target uniqueness,
-   permissions, lock behavior and application tenant authority are
-   **outside this planner**. Constraint arrays must not be shared/mutated
-   across actors during generation. This is an unexecuted draft; a real
+   The renderer composes the full statement directly (no terminator
+   string replacement) and compares duplicate clauses exactly. The
+   `ConstraintSpec` constructor copies caller arrays; its public array
+   fields themselves remain mutable, so it is NOT Sendable and must stay
+   actor-local without concurrent mutation. Referenced key existence,
+   target uniqueness, permissions, lock behavior and tenant authority are
+   **outside this planner**. This is unexecuted draft work; a real
    PostgreSQL DDL/rollback test remains mandatory.
-4. `Query.sql` and `Query.params` are distinct but `params` is currently a
-   mutable actor-local array. No cross-actor sharing, reuse after handoff,
-   or assumption of a deep copy is allowed. The driver must implement owned,
-   immutable typed bound values and reject stale connection generations.
+4. Legacy `Query.sql` and `Query.params` remain distinct but
+   `params` is a mutable actor-local array. New `QueryPlan` performs a
+   defensive copy of its bound strings and exposes no public mutable array;
+   `param_at(index)` returns a checked `Result`. This is a local
+   value-snapshot guarantee, **not** runtime Sendable authorization or a
+   database execution capability. `snapshot_legacy_query` explicitly
+   preserves arbitrary SQL from the trusted legacy source; a driver must not
+   accept it as a whitelisted/tenant-authorized prepared query. Runtime
+   ownership, typed DbValue, and stale-connection fencing remain blockers.
 5. `find_in_workspace_checked(table, workspace, id)` admits only the same
    bounded ASCII table identifiers as the typed DDL API and keeps values
    separate from SQL. The original `find_in_workspace` remains legacy and
