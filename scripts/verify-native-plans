@@ -75,7 +75,7 @@ for dependency in "${dependencies[@]}"; do
   printf '%s\t' "$dependency" >> "$evidence/runtime-dependencies.tsv"
   sha256_file "$dependency" | awk '{print $1}' >> "$evidence/runtime-dependencies.tsv"
 done
-for file in SOURCE_REF scripts/ores scripts/verify-native-plans src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores; do
+for file in SOURCE_REF scripts/ores scripts/verify-native-plans src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
   sha256_file "$root/$file" >> "$evidence/orm-sources.sha256"
 done
 (cd "$compiler" && find target/classes -type f | LC_ALL=C sort | while IFS= read -r file; do
@@ -108,5 +108,6 @@ run_guest() {
 run_guest positive tests/plans.ores positive
 run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'
 run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'
-printf 'VERIFIED: three native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
+run_guest control-identifier tests/negative/control_identifier.ores 'invalid PostgreSQL identifier surface'
+printf 'VERIFIED: four native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
 cat "$evidence/RESULT.txt"
