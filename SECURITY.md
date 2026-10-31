@@ -17,7 +17,7 @@ a scope and release-gating contract, not certification.
    data. Its presence is a compatibility escape hatch, not a safe API.
 3. `pg.table_typed_pk` renders declared `ColumnSpec` data and primary-key
    references through admitted type/identifier formatting, rejecting empty
-   names, unknown types, missing keys and duplicate names/keys. It is a
+   names, unknown types, missing keys, nullable primary-key columns and\n   duplicate names/keys. It is a
    restricted DDL builder, **not** general PostgreSQL AST coverage. Even this
    API is not yet approved for untrusted identifiers due to item 1.
 4. `Query.sql` and `Query.params` are distinct but `params` is currently a
