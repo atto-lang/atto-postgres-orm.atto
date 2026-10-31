@@ -303,6 +303,35 @@ pub routine main(): void {
   if pg.checked_db_value("text", "", false).is_err() then
     panic("empty non-NULL text parameter rejected");
   fi
+  // Caller mutation must not alter a previously planned immutable snapshot.
+  let Array<DbValue> mutable_typed_binds = arr[
+    pg.checked_db_value("uuid", "original-workspace", false).unwrap(),
+    pg.checked_db_value("uuid", "original-record", false).unwrap()
+  ];
+  val typed_snapshot = pg.workspace_typed_values_checked("runs", mutable_typed_binds);
+  if typed_snapshot.is_err() then panic("admitted typed bind snapshot rejected"); fi
+  mutable_typed_binds.set(0, pg.checked_db_value("uuid", "modified-workspace", false).unwrap());
+  mutable_typed_binds.set(1, pg.checked_db_value("uuid", "modified-record", false).unwrap());
+  if typed_snapshot.unwrap().param_at(0).unwrap().scalar != "original-workspace" then
+    panic("typed workspace value aliased caller array");
+  fi
+  if typed_snapshot.unwrap().param_at(1).unwrap().scalar != "original-record" then
+    panic("typed record value aliased caller array");
+  fi
+  if !pg.workspace_typed_values_checked("runs", arr[]).is_err() then
+    panic("empty typed workspace binds admitted");
+  fi
+  if !pg.workspace_typed_values_checked("runs", arr[
+    pg.checked_db_value("uuid", "only-one", false).unwrap()
+  ]).is_err() then panic("one typed workspace bind admitted"); fi
+  if !pg.workspace_typed_values_checked("runs", arr[
+    pg.checked_db_value("text", "not-a-uuid-tag", false).unwrap(),
+    pg.checked_db_value("uuid", "record-id", false).unwrap()
+  ]).is_err() then panic("wrong typed bind tag admitted"); fi
+  if !pg.workspace_typed_values_checked("runs", arr[
+    pg.checked_db_value("uuid", "", true).unwrap(),
+    pg.checked_db_value("uuid", "record-id", false).unwrap()
+  ]).is_err() then panic("NULL typed workspace bind admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
