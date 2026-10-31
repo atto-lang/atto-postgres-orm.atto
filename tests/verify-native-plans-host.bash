@@ -17,6 +17,13 @@ grep -Fq "fail 'native guest receipt contains non-PASS result'" "$root/scripts/v
 # Confirm source and guest maintain independent complete ASCII control catalogs.
 grep -Fq 'for (val control of arr[' "$root/src/pg.ores"
 grep -Fq 'for (val control of arr[' "$root/tests/plans.ores"
+# An is_identifier result is not proof of the stricter ASCII-only contract.
+# Verify the typed renderer rejects every character left by the ASCII map.
+grep -Fq 'if name.replace_literal("|", "") != name then return false; fi' "$root/src/pg.ores"
+grep -Fq 'if mapped.replace_literal("|", "") != "" then return false; fi' "$root/src/pg.ores"
+grep -Fq 'if pg.admitted_identifier("nameé")' "$root/tests/plans.ores"
+grep -Fq 'if pg.admitted_identifier("Ωname")' "$root/tests/plans.ores"
+grep -Fq 'if pg.admitted_identifier("name|other")' "$root/tests/plans.ores"
 grep -Fq "run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'" "$root/scripts/verify-native-plans"
 grep -Fq "run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'" "$root/scripts/verify-native-plans"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-harness-mock.XXXXXXXX")"
