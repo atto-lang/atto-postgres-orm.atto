@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Host-only fail-closed checks with a fake psql. Not PostgreSQL execution.
 set -euo pipefail
-root="$(cd "$(dirname "\${BASH_SOURCE[0]}")/.." && pwd -P)"
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 script="$root/tests/pg17-ddl-contract.bash"
-work="$(mktemp -d "\${TMPDIR:-/tmp}/ores-pg-ddl-mock.XXXXXXXX")"
+work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-ddl-mock.XXXXXXXX")"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/bin"
 cat > "$work/bin/psql" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
 cat > "$PG_MOCK_STDIN"
-printf '%s\n' "\${PG_MOCK_RESULT:-0}"
-exit "\${PG_MOCK_EXIT:-0}"
+printf '%s\n' "${PG_MOCK_RESULT:-0}"
+exit "${PG_MOCK_EXIT:-0}"
 MOCK
 chmod +x "$work/bin/psql"
 export PATH="$work/bin:$PATH" PG_TEST_DSN='postgresql://test@disposable/db' PG_MOCK_STDIN="$work/input.sql"
