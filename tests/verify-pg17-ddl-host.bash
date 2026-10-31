@@ -9,6 +9,10 @@ mkdir -p "$work/bin"
 cat > "$work/bin/psql" <<'MOCK'
 #!/usr/bin/env bash
 set -euo pipefail
+if [[ "$*" == *"SHOW server_version_num"* ]]; then
+  printf '%s\n' "${PG_MOCK_SERVER_VERSION:-170005}"
+  exit "${PG_MOCK_VERSION_EXIT:-0}"
+fi
 cat > "$PG_MOCK_STDIN"
 printf '%s\n' "${PG_MOCK_RESULT:-0}"
 exit "${PG_MOCK_EXIT:-0}"
@@ -41,4 +45,15 @@ check_reject nonrollback-detection
 unset PG_MOCK_RESULT
 export PG_MOCK_EXIT=41
 check_reject psql-command-failure
-printf '%s\n' 'HOST_DDL_MOCK_SCENARIOS=5/5 PASS (NOT POSTGRESQL OR ORESLANG EXECUTION)'
+unset PG_MOCK_EXIT
+export PG_MOCK_SERVER_VERSION=160017
+check_reject rejects-postgresql-16
+export PG_MOCK_SERVER_VERSION=180000
+check_reject rejects-postgresql-18
+export PG_MOCK_SERVER_VERSION=17.0
+check_reject rejects-malformed-version
+unset PG_MOCK_SERVER_VERSION
+export PG_MOCK_VERSION_EXIT=41
+check_reject version-probe-failure
+unset PG_MOCK_VERSION_EXIT
+printf '%s\n' 'HOST_DDL_MOCK_SCENARIOS=9/9 PASS (NOT POSTGRESQL OR ORESLANG EXECUTION)'
