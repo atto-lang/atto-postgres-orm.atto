@@ -438,6 +438,20 @@ define module pg as
     fi
     return true;
   }
+  // Checked parser-facing factories; public constructors alone are never
+  // trusted evidence that an incoming DbValue/FieldChange is well-formed.
+  pub fnc db_value_checked(string kind, string encoded, bool is_null): Result<DbValue, string> {
+    val candidate = new DbValue(kind, encoded, is_null);
+    if !admitted_db_value(candidate) then return Err("invalid encoded PostgreSQL bind"); fi
+    return Ok(candidate);
+  }
+  pub fnc change_checked(string state, DbValue value): Result<FieldChange, string> {
+    if state != "not_set" && state != "unchanged" && state != "set" then
+      return Err("invalid field change state");
+    fi
+    if !admitted_db_value(value) then return Err("invalid field change value"); fi
+    return Ok(new FieldChange(state, value));
+  }
   pub fnc change_not_set(): FieldChange {
     return new FieldChange("not_set", db_text(""));
   }
