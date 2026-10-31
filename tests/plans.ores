@@ -7,6 +7,15 @@ pub routine main(): void {
   val query = pg.find_in_workspace("runs", "hostile' OR true--", "id");
   if query.params.get(0) != "hostile' OR true--" then panic("bound params"); fi
   if query.sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query SQL"); fi
+  if !pg.column("", "text", false).is_err() then panic("empty column identifier admitted"); fi
+  if pg.column("payload", "bytea", false).unwrap() != "\"payload\" bytea NOT NULL" then panic("bytea allowlist"); fi
+  val ddl = pg.table("safe\"name", arr[
+    pg.column("x", "bytea", false).unwrap()
+  ], arr["PRIMARY KEY (\"x\")"]);
+  if ddl != "CREATE TABLE \"safe\"\"name\" (\n  \"x\" bytea NOT NULL,\n  PRIMARY KEY (\"x\")\n);\n" then panic("DDL identifier quoting"); fi
+  val hostile_table = pg.find_in_workspace("runs\" JOIN secret ON true --", "w", "i");
+  if hostile_table.sql != "SELECT * FROM \"runs\"\" JOIN secret ON true --\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query table quoting"); fi
+  if hostile_table.params.get(0) != "w" || hostile_table.params.get(1) != "i" then panic("bind/SQL separation"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
