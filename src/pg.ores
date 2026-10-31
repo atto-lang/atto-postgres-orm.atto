@@ -8,6 +8,32 @@ pub define class Query as
   }
 end
 
+// Read-only query plan facade. The parameter array is copied at admission
+// and is not exposed through the API; individual bound strings are immutable.
+// No Sendable/runtime capability assertion: keep plans actor-local pending
+// backend ownership and database-driver integration.
+pub define class QueryPlan as
+  pub val string sql;
+  val Array<string> saved_params;
+  pub constructor(string sql, Array<string> params) {
+    self.sql = sql;
+    let Array<string> snapshot = arr[];
+    for (val param of params) {
+      snapshot.add(param);
+    }
+    self.saved_params = snapshot;
+  }
+  pub param_count(): int {
+    return self.saved_params.size;
+  }
+  pub param_at(int index): Result<string, string> {
+    if index < 0 || index >= self.saved_params.size then
+      return Err("query parameter index out of bounds");
+    fi
+    return Ok(self.saved_params.get(index));
+  }
+end
+
 // Data-only inputs for the checked primary-key table builder. Never store SQL here.
 pub define class ColumnSpec as
   pub val string name;
@@ -235,6 +261,18 @@ define module pg as
       sql = sql + ",\n  " + constraint;
     }
     return sql + "\n);\n";
+  }
+  // Only data values are parameters. This checked planner snapshots them
+  // before exposing the plan; it is NOT a tenant credential or a DB executor.
+  pub fnc find_in_workspace_plan_checked(string table, string workspace, string id): Result<QueryPlan, string> {
+    if !admitted_identifier(table) then return Err("unadmitted PostgreSQL query table identifier"); fi
+    return Ok(new QueryPlan("SELECT * FROM " + ident(table)
+      + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]));
+  }
+  // Compatibility adapter for existing trusted local Query objects.
+  // This copies parameter values; it does NOT sanitize SQL or grant authority.
+  pub fnc snapshot_legacy_query(Query query): QueryPlan {
+    return new QueryPlan(query.sql, query.params);
   }
   // Restricted table admission only. Workspace text is NOT tenant authority,
   // and Query.params is still actor-local mutable data, not an owned plan.
