@@ -10,9 +10,13 @@ end
 
 define module pg as
   pub fnc ident(string name): string {
+    // An empty PostgreSQL identifier is not a valid table or column name.
+    // Do not generate SQL that only fails after reaching the driver.
+    if name == "" then panic("empty PostgreSQL identifier"); fi
     return "\"" + name.replace_literal("\"", "\"\"") + "\"";
   }
   pub fnc column(string name, string kind, bool nullable): Result<string, string> {
+    if name == "" then return Err("empty PostgreSQL column identifier"); fi
     if kind != "uuid" && kind != "text" && kind != "integer" && kind != "bigint"
       && kind != "boolean" && kind != "jsonb" && kind != "timestamptz" && kind != "bytea" then
       return Err("unsupported PostgreSQL type");
