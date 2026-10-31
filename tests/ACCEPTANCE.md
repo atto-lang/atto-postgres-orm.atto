@@ -16,6 +16,35 @@ The ORM planner does not execute SQL, authenticate tenants or own a DB socket.
 - Inspect the **exact head tree** of this PR; do not silently run a changed or
   locally patched fixture. A zero-step CI job is runner-admission evidence only.
 
+## Host-only verifier regression suite (NOT guest execution)
+
+Run on any host with Bash and Git; no JDK 25, Maven, private compiler,
+PostgreSQL, or network is needed:
+
+```sh
+bash -n scripts/verify-native-plans
+bash -n tests/verify-native-plans-host.bash
+bash tests/verify-native-plans-host.bash
+```
+
+This test is deliberately isolated from the real guest: it initializes
+temporary **mock Git repositories**, a fake Maven build, a fake Java 25
+launcher, and fake guest outcomes, then removes them. No fake receipt is
+valid native evidence. Seven cases check normal mocked results, missing
+negative guest sentinel, mismatched Maven Java, stale evidence directory,
+wrong reviewed ORM SHA, untracked fixture, and dirty tracked source.
+
+At the exact Git blobs `e3f664d3e33014e1aa1ae50fb44b9f918ec4299d`
+(verifier) and `a1cda035f003ab5403cb40a3c2224f1e6759b134`
+(mock test), Bash syntax validation and **7/7 mocked host scenarios**
+were executed locally and passed. Blob identities were checked using
+`git hash-object`. This is **only verifier control-flow evidence**.
+The actual guest tests and real PostgreSQL integration remain NOT EXECUTED.
+
+The separate CI job `.github/workflows/pg-host-verifier.yml` runs these
+host-only checks after runner admission is restored. It cannot satisfy the
+native guest/release gate.
+
 ## One-command native execution gate
 
 From a clean checkout of this exact PR head, on an authorized machine with
