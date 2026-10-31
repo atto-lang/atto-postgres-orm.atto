@@ -3,6 +3,8 @@ on:
   pull_request:
     paths:
       - 'scripts/verify-native-plans'
+      - 'scripts/ores'
+      - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   push:
@@ -10,6 +12,8 @@ on:
       - 'hardening/typed-pg-ddl-pk-20261030'
     paths:
       - 'scripts/verify-native-plans'
+      - 'scripts/ores'
+      - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   workflow_dispatch:
@@ -28,11 +32,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          bash -n scripts/ores
+          bash -n tests/verify-launcher-host.bash
           bash -n scripts/verify-native-plans
           bash -n tests/verify-native-plans-host.bash
-      - name: Seven host-only fake-compiler failure-injection tests
+      - name: Nine verifier and eight launcher host-only failure-injection suites
         shell: bash
         run: |
           set -euo pipefail
           bash tests/verify-native-plans-host.bash
+          bash tests/verify-launcher-host.bash
           printf '%s\n' 'HOST_ONLY_VERIFIER_TESTS_COMPLETE: No native Oreslang guest or PostgreSQL executed'
