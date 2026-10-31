@@ -42,12 +42,13 @@ An earlier seven-case harness was exercised locally against older
 Git blobs. The current **nine-case** harness and verifier are identified by
 Git blobs `5aa9db4edbe4f3be7a2fd014e523077fa3de7d3d` and
 `7a211fd93fdf979474f256df49214be25065712e`, respectively.
-The two new ignored-file cases are source-authored and require execution
-against the exact current blobs before claiming **9/9 passed**.
-The underlying Git ignore bypass was separately reproduced with a small
-local Git test; that reproduction is not a nine-case harness run.
-All host-only results are verifier control-flow evidence, never native
-Oreslang compiler/guest or real PostgreSQL proof.
+Both current scripts were reconstructed locally byte-for-byte: their
+`git hash-object` values matched the two GitHub blob SHAs above. Both
+passed `bash -n`, and the complete **9/9 host-only mocked scenarios
+executed and passed locally**, including ignored guest and ignored compiler
+files. The test printed `MOCK_HOST_GATE_SCENARIOS=9/9 PASS`.
+These results are verifier control-flow evidence **only**; they do not
+establish native Oreslang compiler/guest or real PostgreSQL execution.
 
 The separate CI job `.github/workflows/pg-host-verifier.yml` runs these
 host-only checks after runner admission is restored. It cannot satisfy the
