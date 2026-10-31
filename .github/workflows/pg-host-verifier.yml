@@ -42,7 +42,7 @@ jobs:
           bash -n tests/verify-native-plans-host.bash
           bash -n tests/pg17-ddl-contract.bash
           bash -n tests/verify-pg17-ddl-host.bash
-      - name: Host-only failure-injection suites (10 verifier, 8 launcher, 5 SQL mocks)
+      - name: Host-only failure-injection suites (10 verifier, 8 launcher, 9 SQL mocks)
         shell: bash
         run: |
           set -euo pipefail
