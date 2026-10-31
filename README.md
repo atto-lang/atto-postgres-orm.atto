@@ -42,10 +42,17 @@ are rejected rather than normalized or truncated. `pg.ident`,
 `pg.column`, `pg.table` and `pg.find_in_workspace` remain legacy
 surfaces without full admission and must not receive untrusted identifiers.
 
-The new `find_in_workspace_checked` method applies the same strict identifier
-policy to workspace-query table names and returns `Result<Query,string>`. It
-still exposes an actor-local mutable parameter array and does not validate
-workspace membership. The legacy `find_in_workspace` remains for compatibility.
+The `find_in_workspace_checked` method applies strict identifier admission
+and returns the legacy `Result<Query,string>` surface, still exposing an
+actor-local mutable parameter array. New code may use
+`find_in_workspace_plan_checked` for a `Result<QueryPlan,string>`. The
+`QueryPlan` constructor copies bound strings into a private array and exposes
+only `param_count()` / `param_at(index)` (bounds checked, returning
+`Result<string,string>`), plus its read-only SQL string. A transitional
+`snapshot_legacy_query` helper copies a trusted legacy `Query` but does
+**not** sanitize its SQL, validate tenant authority or make it executable.
+Both are actor-local draft data types; no Sendable/driver capability is
+established. Workspace membership and RLS must be checked independently.
 
 ### Typed UNIQUE and FOREIGN KEY constraints (draft; guest execution pending)
 
@@ -64,10 +71,16 @@ val ddl = pg.table_typed_pk_constraints("docs", arr[
 ]);
 ```
 
-The builder checks identifier admission, local-column existence, local and
-referenced duplicate columns, FK arity, unknown constraint kinds, and duplicate
-rendered constraints. It limits each constraint to 1–32 local columns and
-each table to 32 additional constraints. Remote table/column existence,
+The shared renderer emits PK, UNIQUE and FK in a **single direct pass**.
+There is no finished-statement terminator replacement; duplicate rendered
+clauses are compared for exact equality. ConstraintSpec copies both input
+arrays upon construction, so later mutations of the original caller arrays
+cannot alter the captured names. Its public array fields remain mutable,
+however, so callers must not mutate or share these objects across actors
+during rendering. The builder validates local-column existence, FK arity,
+identifier admission, duplicate column names and constraint identity, with
+limits of 64 columns, 32 PK fields, 32 additional constraints and 32 local
+columns per constraint. Remote table/column existence,
 unique-index suitability and cross-schema ownership **cannot be verified
 without a database**; PostgreSQL must validate them during DDL execution.
 There are no raw CHECK expressions, arbitrary referential actions, deferrable
