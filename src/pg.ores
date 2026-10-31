@@ -111,8 +111,8 @@ define module pg as
   }
   // Factory keeps callers independent of ColumnSpec module-export conventions.
   // Safe typed-DDL identifier subset: ASCII only, length 1..63 bytes.
-  // is_identifier rejects quotes, controls, Unicode and qualification.
-  // It restricts input to ASCII, so each character is exactly one UTF-8 byte.
+  // is_identifier checks syntax only; residual rejection below enforces
+  // the ASCII subset independently. Each admitted character is one UTF-8 byte.
   // The pinned compiler exposes no string byte-length API; map admitted
   // characters to a delimiter then count split components.
   pub fnc admitted_identifier(string name): bool {
