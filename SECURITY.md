@@ -9,9 +9,10 @@ a scope and release-gating contract, not certification.
    ASCII `[A-Za-z_][A-Za-z0-9_]*`, 1..63 bytes, counted through
    `split_literal(...).size` after mapping the known ASCII alphabet to a delimiter.
    Non-ASCII, quotes, NUL/C0 controls and dotted/qualified input are rejected.
-   The older `pg.ident` only escapes embedded quotes and rejects empty/LF/CR/TAB
-   surfaces: it does not enforce complete NUL/C0 or byte-length admission and
-   is not an authorization capability. Do not pass untrusted identifiers to
+   The legacy `pg.ident` escapes embedded quotes and now rejects
+   empty names and every ASCII C0/DEL control, including NUL. It still
+   does not enforce PostgreSQL's 63-byte UTF-8 identifier limit, Unicode
+   normalization, or tenant authorization; it remains trusted-only. Do not pass untrusted identifiers to
    `pg.ident`, `pg.table`, `pg.column`, or `pg.find_in_workspace`.
 2. `pg.column` accepts a small fixed PostgreSQL type list. Legacy `pg.table`
    accepts **raw SQL column and constraint strings** and MUST NOT receive
@@ -19,7 +20,8 @@ a scope and release-gating contract, not certification.
    data. Its presence is a compatibility escape hatch, not a safe API.
 3. `pg.table_typed_pk` renders declared `ColumnSpec` data and primary-key
    references through admitted type/identifier formatting, rejecting empty
-   names, unknown types, missing keys, nullable primary-key columns and\n   duplicate names/keys. It is a
+   names, unknown types, missing keys, nullable primary-key columns and
+   duplicate names/keys. It is a
    restricted DDL builder, **not** general PostgreSQL AST coverage.
    Lexical identifier admission does not establish tenant authorization,
    transactional safety, or safe arbitrary SQL expressions.
@@ -78,7 +80,7 @@ this task.
 
 ## Release-blocking negative oracles
 
-- Typed-identifier: ASCII 63/64-byte boundary, quotes, NUL, C0 controls,
+- Typed-identifier: ASCII 63/64-byte boundary, quotes, NUL, C0/DEL controls,
   Unicode, reserved words, case sensitivity, schema qualification and truncation
   collisions. Reject unsupported inputs explicitly. Separate tests must enforce
   the legacy API's trusted-only boundary; it is not equivalent to typed admission.
@@ -111,3 +113,13 @@ roles and independent RLS tests before any production promotion. The current
 source contains no such driver or integration harness. Do not export private
 source to another organization or relax branch protection to obtain CI results
 without separate approved source-transfer policy.
+
+## C0/DEL additional guest gate
+
+The legacy quoted-identifier path now enumerates and rejects all 33
+ASCII C0/DEL characters. The positive native fixture checks every byte
+independently, while `tests/negative/control_identifier.ores` verifies that
+`pg.ident` panics before emitting SQL. The exact error diagnostic is
+`invalid PostgreSQL identifier surface`. Its separate runtime-start marker
+must be observed; a compiler failure cannot count as a negative guest pass.
+This change is not yet validated by a real pinned JDK25 guest run.
