@@ -140,6 +140,9 @@ define module pg as
     Array<string> key_columns,
     Array<ConstraintSpec> constraints
   ): Result<string, string> {
+    // Bound the quadratic duplicate checks before constructing any SQL.
+    if columns.size > 64 then return Err("too many PostgreSQL table columns"); fi
+    if key_columns.size > 32 then return Err("too many PostgreSQL primary-key columns"); fi
     val base = table_typed_pk(name, columns, key_columns);
     if base.is_err() then return Err("invalid base typed PostgreSQL table"); fi
     if constraints.size > 32 then return Err("too many PostgreSQL table constraints"); fi
