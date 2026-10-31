@@ -35,7 +35,8 @@ if ! command -v sha256sum >/dev/null 2>&1; then require shasum; fi
 actual_orm="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || fail 'cannot read ORM git HEAD'
 [[ "$actual_orm" == "$expected_orm" ]] || fail "ORM head mismatch: expected $expected_orm; got $actual_orm"
 [[ -z "$(git -C "$root" status --porcelain --untracked-files=no)" ]] || fail 'ORM checkout has tracked modifications'
-[[ -z "$(git -C "$root" ls-files --others --exclude-standard -- src tests scripts)" ]] || fail 'ORM checkout has untracked guest source or scripts'
+# Do not respect .gitignore: ignored guest files can still affect execution.
+[[ -z "$(git -C "$root" ls-files --others -- src tests scripts)" ]] || fail 'ORM checkout has untracked or ignored guest source or scripts'
 [[ -f "$root/SOURCE_REF" ]] || fail 'SOURCE_REF is missing'
 pinned="$(tr -d '\r\n' < "$root/SOURCE_REF")"
 [[ "$pinned" =~ ^[0-9a-f]{40}$ ]] || fail 'invalid compiler SOURCE_REF'
@@ -44,6 +45,9 @@ compiler="$(cd "$compiler" && pwd -P)"
 actual_compiler="$(git -C "$compiler" rev-parse HEAD 2>/dev/null)" || fail 'cannot inspect compiler git HEAD'
 [[ "$actual_compiler" == "$pinned" ]] || fail "compiler head mismatch: expected $pinned; got $actual_compiler"
 [[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] || fail 'compiler checkout has tracked modifications'
+# Maven compiles from local source roots regardless of gitignore patterns.
+# Refuse untracked/ignored build inputs, while permitting generated target/ files.
+[[ -z "$(git -C "$compiler" ls-files --others -- src pom.xml .mvn)" ]] || fail 'compiler checkout has untracked or ignored build inputs'
 case "$evidence/" in "$compiler/"*) fail 'Evidence must be stored outside the compiler checkout';; esac
 version="$($java_bin -version 2>&1 | head -n 1)" || fail 'cannot read Java version'
 [[ "$version" =~ \"25([.\"]|$) ]] || fail "JDK 25 required; observed $version"
