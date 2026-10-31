@@ -5,12 +5,14 @@ a scope and release-gating contract, not certification.
 
 ## Trust boundaries
 
-1. `pg.ident` escapes embedded double quotes and rejects empty names (in
-   the prerequisite hardening branch), and rejects LF/CR/TAB surfaces, but does **not** validate NUL, other C0
-   characters, PostgreSQL's identifier byte limit, schema-qualified component
-   boundaries, or normalization/truncation collisions. Identifier validation
-   must occur before any privileged execution. Quoted text is not an
-   authorization capability.
+1. `pg.admitted_identifier` is a narrow safe input policy for typed DDL:
+   ASCII `[A-Za-z_][A-Za-z0-9_]*`, 1..63 bytes, counted through
+   `split_literal` after mapping the known ASCII alphabet to a delimiter.
+   Non-ASCII, quotes, NUL/C0 controls and dotted/qualified input are rejected.
+   The older `pg.ident` only escapes embedded quotes and rejects empty/LF/CR/TAB
+   surfaces: it does not enforce complete NUL/C0 or byte-length admission and
+   is not an authorization capability. Do not pass untrusted identifiers to
+   `pg.ident`, `pg.table`, `pg.column`, or `pg.find_in_workspace`.
 2. `pg.column` accepts a small fixed PostgreSQL type list. Legacy `pg.table`
    accepts **raw SQL column and constraint strings** and MUST NOT receive
    user-supplied content. No application should call it from request/tenant
@@ -18,8 +20,9 @@ a scope and release-gating contract, not certification.
 3. `pg.table_typed_pk` renders declared `ColumnSpec` data and primary-key
    references through admitted type/identifier formatting, rejecting empty
    names, unknown types, missing keys, nullable primary-key columns and\n   duplicate names/keys. It is a
-   restricted DDL builder, **not** general PostgreSQL AST coverage. Even this
-   API is not yet approved for untrusted identifiers due to item 1.
+   restricted DDL builder, **not** general PostgreSQL AST coverage.
+   Lexical identifier admission does not establish tenant authorization,
+   transactional safety, or safe arbitrary SQL expressions.
 4. `Query.sql` and `Query.params` are distinct but `params` is currently a
    mutable actor-local array. No cross-actor sharing, reuse after handoff,
    or assumption of a deep copy is allowed. The driver must implement owned,
@@ -34,9 +37,10 @@ a scope and release-gating contract, not certification.
 
 ## Release-blocking negative oracles
 
-- Identifier: empty, embedded quote, NUL, C0 controls, multibyte UTF-8 at
-  63/64-byte boundaries, qualified names, collisions after truncation,
-  reserved words, case sensitivity and Unicode normalization variants.
+- Typed-identifier: ASCII 63/64-byte boundary, quotes, NUL, C0 controls,
+  Unicode, reserved words, case sensitivity, schema qualification and truncation
+  collisions. Reject unsupported inputs explicitly. Separate tests must enforce
+  the legacy API's trusted-only boundary; it is not equivalent to typed admission.
 - Schema: unknown type, empty columns/keys, duplicate names/keys,
   undeclared primary-key reference, malformed foreign/unique/check expressions,
   raw-SQL injection through legacy inputs.
