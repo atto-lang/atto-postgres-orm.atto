@@ -7,10 +7,18 @@ compiler="${ORESLANG_SOURCE_DIR:-$root/../oreslang-source.java}"
 java_bin="${ORES_JAVA:-java}"
 expected_orm="${EXPECTED_ORM_SHA:-}"
 evidence="${EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-guest.XXXXXXXX")}"
-mkdir -p "$evidence"
+# Never reuse an evidence directory: stale files must never look like new proof.
+if [[ -e "$evidence" ]]; then
+  [[ -d "$evidence" && ! -L "$evidence" ]] || { echo 'Evidence path must be an ordinary directory' >&2; exit 1; }
+  [[ -z "$(find "$evidence" -mindepth 1 -maxdepth 1 -print -quit)" ]] || { echo 'Evidence directory must be empty (no stale receipts)' >&2; exit 1; }
+else
+  mkdir -p "$evidence"
+fi
 evidence="$(cd "$evidence" && pwd -P)"
 case "$evidence/" in "$root/"*) printf "Evidence must be stored outside the ORM tree\n" >&2; exit 1;; esac
 printf 'Native guest evidence directory: %s\n' "$evidence"
+# A killed process or unexpected shell failure must remain NOT_VERIFIED.
+printf '%s\n' 'NOT_VERIFIED: native guest verification incomplete' > "$evidence/RESULT.txt"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; printf 'NOT_VERIFIED: %s\n' "$*" > "$evidence/RESULT.txt"; exit 1; }
 require() { command -v "$1" >/dev/null 2>&1 || fail "required command missing: $1"; }
@@ -36,10 +44,16 @@ compiler="$(cd "$compiler" && pwd -P)"
 actual_compiler="$(git -C "$compiler" rev-parse HEAD 2>/dev/null)" || fail 'cannot inspect compiler git HEAD'
 [[ "$actual_compiler" == "$pinned" ]] || fail "compiler head mismatch: expected $pinned; got $actual_compiler"
 [[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] || fail 'compiler checkout has tracked modifications'
+case "$evidence/" in "$compiler/"*) fail 'Evidence must be stored outside the compiler checkout';; esac
 version="$($java_bin -version 2>&1 | head -n 1)" || fail 'cannot read Java version'
 [[ "$version" =~ \"25([.\"]|$) ]] || fail "JDK 25 required; observed $version"
+# ORES_JAVA controls the guest launcher, but Maven may use JAVA_HOME instead.
+# Fail if the compiler build itself would run on an unpinned/older Java.
+mvn -version > "$evidence/maven-version.stdout" 2> "$evidence/maven-version.stderr" || fail 'cannot inspect Maven runtime'
+grep -Eq '^Java version: 25([.,[:space:]]|$)' "$evidence/maven-version.stdout" || fail 'Maven must run on JDK 25; align JAVA_HOME with ORES_JAVA'
 
 printf 'orm_head=%s\ncompiler_head=%s\njava_version=%s\n' "$actual_orm" "$actual_compiler" "$version" > "$evidence/provenance.txt"
+printf 'java_home=%s\n' "${JAVA_HOME:-unset}" >> "$evidence/provenance.txt"
 git -C "$root" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
 git -C "$compiler" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
 printf '%s\n' 'mvn -q -DskipTests clean package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt' >> "$evidence/provenance.txt"
