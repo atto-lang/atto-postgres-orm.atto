@@ -8,6 +8,14 @@ pub routine main(): void {
   if query.params.get(0) != "hostile' OR true--" then panic("bound params"); fi
   if query.sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query SQL"); fi
   if !pg.column("", "text", false).is_err() then panic("empty column identifier admitted"); fi
+  if !pg.invalid_identifier_surface("line\nbreak") then panic("LF identifier surface admitted"); fi
+  if !pg.invalid_identifier_surface("line\rbreak") then panic("CR identifier surface admitted"); fi
+  if !pg.invalid_identifier_surface("line\tbreak") then panic("TAB identifier surface admitted"); fi
+  if !pg.column("line\nbreak", "text", false).is_err() then panic("LF column identifier admitted"); fi
+  if !pg.column("line\tbreak", "uuid", false).is_err() then panic("TAB column identifier admitted"); fi
+  if !pg.table_typed_pk("unsafe\rname", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_err() then panic("CR table identifier admitted"); fi
   if pg.column("payload", "bytea", false).unwrap() != "\"payload\" bytea NOT NULL" then panic("bytea allowlist"); fi
   val ddl = pg.table("safe\"name", arr[
     pg.column("x", "bytea", false).unwrap()
