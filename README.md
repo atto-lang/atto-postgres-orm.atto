@@ -73,11 +73,11 @@ val ddl = pg.table_typed_pk_constraints("docs", arr[
 
 The shared renderer emits PK, UNIQUE and FK in a **single direct pass**.
 There is no finished-statement terminator replacement; duplicate rendered
-clauses are compared for exact equality. ConstraintSpec copies both input
-arrays upon construction, so later mutations of the original caller arrays
-cannot alter the captured names. Its public array fields remain mutable,
-however, so callers must not mutate or share these objects across actors
-during rendering. The builder validates local-column existence, FK arity,
+clauses are compared for exact equality. `ConstraintSpec` copies both input arrays upon construction
+into private fields, and its `local_columns()` / `referenced_columns()`
+accessors return new copies. Source-array and returned-array mutation cannot
+alter saved identifiers. These values remain actor-local until independent
+`Sendable`/runtime ownership verification. The builder validates local-column existence, FK arity,
 identifier admission, duplicate column names and constraint identity, with
 limits of 64 columns, 32 PK fields, 32 additional constraints and 32 local
 columns per constraint. Remote table/column existence,
