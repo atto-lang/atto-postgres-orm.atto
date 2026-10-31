@@ -31,6 +31,13 @@ pub routine main(): void {
     pg.column_spec("id", "uuid", false)
   ], arr["missing"]).is_err() then panic("undeclared primary-key column"); fi
   if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", true)
+  ], arr["id"]).is_err() then panic("nullable primary-key column admitted"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr[]).is_err() then panic("missing primary key admitted"); fi
+  if !pg.table_typed_pk("runs", arr[], arr["id"]).is_err() then panic("empty typed columns admitted"); fi
+  if !pg.table_typed_pk("runs", arr[
     pg.column_spec("id", "uuid", false), pg.column_spec("id", "uuid", false)
   ], arr["id"]).is_err() then panic("duplicate typed columns"); fi
   if !pg.table_typed_pk("runs", arr[
