@@ -23,7 +23,7 @@ pub routine main(): void {
     pg.column_spec("payload", "jsonb", true)
   ], arr["workspace_id", "id"]);
   if typed.is_err() then panic("typed DDL rejected admitted schema"); fi
-  if typed.unwrap() != "CREATE TABLE \"workflows\" (\\n  \"workspace_id\" uuid NOT NULL,\\n  \"id\" uuid NOT NULL,\\n  \"payload\" jsonb,\\n  PRIMARY KEY (\"workspace_id\", \"id\")\\n);\\n" then panic("typed DDL canonical SQL"); fi
+  if typed.unwrap() != "CREATE TABLE \"workflows\" (\n  \"workspace_id\" uuid NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"payload\" jsonb,\n  PRIMARY KEY (\"workspace_id\", \"id\")\n);\n" then panic("typed DDL canonical SQL"); fi
   if !pg.table_typed_pk("runs", arr[
     pg.column_spec("id", "text); DROP TABLE runs;--", false)
   ], arr["id"]).is_err() then panic("typed DDL type injection"); fi
