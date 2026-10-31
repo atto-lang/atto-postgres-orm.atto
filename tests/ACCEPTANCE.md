@@ -54,6 +54,35 @@ The separate CI job `.github/workflows/pg-host-verifier.yml` runs these
 host-only checks after runner admission is restored. It cannot satisfy the
 native guest/release gate.
 
+## Host-only launcher hardening checks (not native guest proof)
+
+```sh
+bash -n scripts/ores
+bash -n tests/verify-launcher-host.bash
+bash tests/verify-launcher-host.bash
+```
+
+The launcher requires an explicitly selected Java 25 runtime when
+`ORES_JAVA` is provided and rejects mismatched compiler SHA, dirty or
+untracked/ignored compiler build inputs, missing classpath and missing
+`OresMain.class`. Eight standalone host-only mock scenarios are
+authoritatively identified by Git blobs
+`f6f6319e671f7caa09d927156fe389a2c22b5ce5` (launcher) and
+`106ac7192dd765b7d46f66206662ec89c69979b4` (test).
+Both files were reproduced exactly and passed `bash -n` locally;
+**8/8 mock launch scenarios executed and passed**. No private compiler
+or genuine Oreslang guest was executed in those tests.
+
+### Alternate-org admission screening
+
+Source-free workflows on private `athlet-o/athleto-sync`
+(run `41231046150`) and `honeypot-r-us-test/hnpt-e2e`
+(run `41231112018`) both finished failure with no steps. Prior source,
+Voxletra and Benefactor source-free runs failed similarly, and more
+recent admission-focused runs in Zed/Scintilla/Akrion also had no
+executed steps. These runs do not reveal the exact billing/policy
+reason; **no private ORM tree has been transferred**. See issue #7.
+
 ## One-command native execution gate
 
 From a clean checkout of this exact PR head, on an authorized machine with
