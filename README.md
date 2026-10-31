@@ -35,7 +35,7 @@ val ddl = pg.table_typed_pk("workflows", arr[
 
 The new `admitted_identifier` uses the pinned Java compiler's
 `is_identifier`, `replace_literal`, `split_literal` and collection
-`length` operations. Only ASCII `[A-Za-z_][A-Za-z0-9_]*` identifiers
+`size` property. Only ASCII `[A-Za-z_][A-Za-z0-9_]*` identifiers
 of **1–63 UTF-8 bytes** are admitted to `table_typed_pk` (including
 column and primary-key names). Quotes, dots, Unicode, NUL and controls
 are rejected rather than normalized or truncated. `pg.ident`,
