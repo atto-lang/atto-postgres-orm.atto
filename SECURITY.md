@@ -132,13 +132,14 @@ golden authored in `tests/plans.ores`; its PostgreSQL script uses a generated
 simple-ASCII schema inside `BEGIN` / `ROLLBACK` and fails unless the schema
 is absent afterward. It checks UNIQUE, FK, NOT NULL and composite PK rejects
 with distinct PostgreSQL exception categories. An explicitly disposable database
-and `PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE` are mandatory.
+and `PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE` are mandatory. The SQL-only gate also reads the server's `server_version_num` and fails unless the backend identifies as PostgreSQL 17; a client-version string is insufficient.
 
 The CI `pg17-ddl-integration.yml` declares a disposable PostgreSQL 17
 service, **but a declared CI job is not an executed job**. The separate mock
 suite `verify-pg17-ddl-host.bash` runs without PostgreSQL and checks
-negative preflight and altered-output cases; 5/5 cases passed locally with
-exact matching GitHub shell-script blobs. This does not prove that Oreslang
+negative preflight, altered-output, and server-major checks; **9/9 cases
+passed locally** with exact matching GitHub shell-script blobs, including
+rejection of PostgreSQL 16/18 or missing/malformed version inspection. This does not prove that Oreslang
 emits the SQL, that database access is authorized, that RLS is enforced, or
 that a PostgreSQL driver/actor connection exists. Do not promote the ORM
 on this contract alone.
