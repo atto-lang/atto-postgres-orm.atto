@@ -11,7 +11,9 @@ The ORM planner does not execute SQL, authenticate tenants or own a DB socket.
   artifact digest, JDK version, command line, stdout, stderr and exit code.
 - Build the compiler from that source with JDK 25, including Maven classpath
   generation as specified in the root README. The launcher in `scripts/ores`
-  checks compiler HEAD and tracked modifications; a passing source pin alone
+  checks compiler HEAD and tracked modifications; the native verifier additionally
+  checks untracked *and ignored* compiler/guest source input paths (without
+  consulting .gitignore). A passing source pin alone
   does **not** prove a clean compiler binary. Bind the compiled class/JAR hashes.
 - Inspect the **exact head tree** of this PR; do not silently run a changed or
   locally patched fixture. A zero-step CI job is runner-admission evidence only.
@@ -30,16 +32,22 @@ bash tests/verify-native-plans-host.bash
 This test is deliberately isolated from the real guest: it initializes
 temporary **mock Git repositories**, a fake Maven build, a fake Java 25
 launcher, and fake guest outcomes, then removes them. No fake receipt is
-valid native evidence. Seven cases check normal mocked results, missing
-negative guest sentinel, mismatched Maven Java, stale evidence directory,
-wrong reviewed ORM SHA, untracked fixture, and dirty tracked source.
+valid native evidence. Nine authored cases cover normal mocked results,
+missing negative guest sentinel, mismatched Maven Java, stale evidence
+directory, wrong reviewed ORM SHA, untracked fixture, **ignored guest file**,
+**ignored compiler source**, and dirty tracked source. A Git ignore pattern
+is not a trusted compiler or guest execution boundary.
 
-At the exact Git blobs `e3f664d3e33014e1aa1ae50fb44b9f918ec4299d`
-(verifier) and `a1cda035f003ab5403cb40a3c2224f1e6759b134`
-(mock test), Bash syntax validation and **7/7 mocked host scenarios**
-were executed locally and passed. Blob identities were checked using
-`git hash-object`. This is **only verifier control-flow evidence**.
-The actual guest tests and real PostgreSQL integration remain NOT EXECUTED.
+An earlier seven-case harness was exercised locally against older
+Git blobs. The current **nine-case** harness and verifier are identified by
+Git blobs `5aa9db4edbe4f3be7a2fd014e523077fa3de7d3d` and
+`7a211fd93fdf979474f256df49214be25065712e`, respectively.
+The two new ignored-file cases are source-authored and require execution
+against the exact current blobs before claiming **9/9 passed**.
+The underlying Git ignore bypass was separately reproduced with a small
+local Git test; that reproduction is not a nine-case harness run.
+All host-only results are verifier control-flow evidence, never native
+Oreslang compiler/guest or real PostgreSQL proof.
 
 The separate CI job `.github/workflows/pg-host-verifier.yml` runs these
 host-only checks after runner admission is restored. It cannot satisfy the
