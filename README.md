@@ -31,7 +31,7 @@ the generated model API nor the connection/driver API exists yet.
 ## First typed bind / patch slice (native source, unexecuted)
 
 `src/pg.ores` now defines **data-only** `PgType`, `DbValue`,
-`FieldChange` and `TypedPatchPlan` classes plus checked factories and a
+`FieldChange` and `TypedPatchPlan` classes, alongside a snapshotting `PgTableDescriptor`, plus checked factories and a
 single-column patch planner. Unlike the earlier `QueryPlan`, patch binds
 carry explicit type tags and an SQL NULL flag. The plan snapshots its
 actor-local bind array; a caller-provided value is never interpolated into
@@ -54,7 +54,7 @@ This slice supports `text`, `uuid` and `boolean` bind tags, with
 canonical UUID syntax checking. Other declared `PgType` variants are not
 yet supported as patch-bind codecs. `PgType`, `DbValue` and `FieldChange`
 have public constructors, so planner admission revalidates their state.
-`ColumnSpec` is **not** a generated or authority-bearing schema descriptor;
+Prefer `table_descriptor_checked` and `plan_schema_update_field_checked` for local schema allowlists. `PgTableDescriptor` snapshots the column list and revalidates it at use. `ColumnSpec` is **not** a generated or authority-bearing schema descriptor;
 table/column strings are bounded by conservative identifier validation.
 `workspace_id` is only a checked UUID, **not** authenticated tenant
 authority. This is an **SQL planning layer only**, not a driver, PostgreSQL

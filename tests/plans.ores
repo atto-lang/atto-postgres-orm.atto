@@ -373,6 +373,56 @@ pub routine main(): void {
     pg.change_set(pg.db_text("x")), "not-a-uuid", uuid_b).is_err() then
     panic("unvalidated tenant UUID admitted");
   fi
+  // Table descriptors snapshot columns on creation and on read.
+  let Array<ColumnSpec> schema_columns = arr[
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("title", "text", false),
+    pg.column_spec("note", "text", true)
+  ];
+  val schema_result = pg.table_descriptor_checked("docs", schema_columns);
+  if schema_result.is_err() then panic("admitted table descriptor rejected"); fi
+  if schema_result.unwrap().column_count() != 4 then
+    panic("schema column count mismatch");
+  fi
+  schema_columns.set(3, pg.column_spec("tampered", "text", false));
+  val returned_columns = schema_result.unwrap().columns();
+  returned_columns.set(3, pg.column_spec("another_tamper", "text", false));
+  val schema_patch = pg.plan_schema_update_field_checked(schema_result.unwrap(), "note",
+    pg.change_set(pg.db_text("safe")), uuid_a, uuid_b);
+  if schema_patch.is_err() || schema_patch.unwrap().is_noop then
+    panic("schema descriptor column snapshots were mutable");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "tampered",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("caller mutation changed schema allowlist");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "another_tamper",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("returned schema array mutated internal store");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "undeclared",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("schema planner admitted unknown column");
+  fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("title", "text", false)
+  ]).is_err() then panic("schema without tenant key admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("workspace_id", "text", false)
+  ]).is_err() then panic("schema tenant key type mismatch admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", true),
+    pg.column_spec("workspace_id", "uuid", false)
+  ]).is_err() then panic("nullable id admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("title", "text", false),
+    pg.column_spec("title", "text", false)
+  ]).is_err() then panic("duplicate schema field admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }

@@ -228,3 +228,10 @@ PostgreSQL transaction, a complete `Change<T>` generic or a generated
 schema capability. Do not promote it as authorization: the UUID string is not
 verified against authenticated RLS tenant ownership. Real actor-owned
 connection + independent PostgreSQL RLS tests remain P0 blockers.
+
+The new `PgTableDescriptor` positive guest cases also verify that table
+schemas require nonnullable UUID `id` and `workspace_id`, reject duplicate
+columns and unsupported types, prevent mutation of the original/returned
+column arrays, and reject patch fields missing from the declared schema.
+These are **unexecuted guest assertions**, not proof that `PgTableDescriptor`
+is a compiler-generated nominal capability or PostgreSQL tenant authority.

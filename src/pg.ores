@@ -106,6 +106,31 @@ pub define class DbValue as
   }
 end
 
+// Defensive-copy, data-only table schema. It is NOT a generated nominal
+// compile-time descriptor or permission to execute queries as this tenant.
+pub define class PgTableDescriptor as
+  pub val string name;
+  val Array<ColumnSpec> saved_columns;
+  pub constructor(string name, Array<ColumnSpec> columns) {
+    self.name = name;
+    let Array<ColumnSpec> copy = arr[];
+    for (val column of columns) {
+      copy.add(column);
+    }
+    self.saved_columns = copy;
+  }
+  pub column_count(): int {
+    return self.saved_columns.size;
+  }
+  pub columns(): Array<ColumnSpec> {
+    let Array<ColumnSpec> copy = arr[];
+    for (val column of self.saved_columns) {
+      copy.add(column);
+    }
+    return copy;
+  }
+end
+
 // Three distinct mutation intents. Unchanged and not_set produce no SQL.
 // A caller can construct invalid combinations, so planner must revalidate.
 pub define class FieldChange as
@@ -376,6 +401,69 @@ define module pg as
   pub fnc find_in_workspace(string table, string workspace, string id): Query {
     return new Query("SELECT * FROM " + ident(table)
       + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]);
+  }
+  // Snapshot an admitted schema with mandatory workspace/id UUID keys.
+  // This is a source-local schema guard, NOT AOT code generation or DB
+  // introspection; recheck it whenever a public descriptor is consumed.
+  pub fnc table_descriptor_checked(string name, Array<ColumnSpec> columns): Result<PgTableDescriptor, string> {
+    if !admitted_identifier(name) then return Err("unadmitted schema table"); fi
+    if columns.size == 0 || columns.size > 64 then
+      return Err("schema requires 1 to 64 columns");
+    fi
+    let bool has_id = false;
+    let bool has_workspace = false;
+    for (val column of columns) {
+      if !admitted_identifier(column.name) then return Err("unadmitted schema column"); fi
+      if pg_type_checked(column.kind).is_err() then return Err("unsupported schema column type"); fi
+      let bool seen = false;
+      for (val other of columns) {
+        if other.name == column.name then
+          if seen then return Err("duplicate schema column"); fi
+          seen = true;
+        fi
+      }
+      if column.name == "id" then
+        if column.kind != "uuid" || column.nullable then
+          return Err("schema id must be a required UUID");
+        fi
+        has_id = true;
+      fi
+      if column.name == "workspace_id" then
+        if column.kind != "uuid" || column.nullable then
+          return Err("schema workspace_id must be a required UUID");
+        fi
+        has_workspace = true;
+      fi
+    }
+    if !has_id || !has_workspace then
+      return Err("schema must declare id and workspace_id");
+    fi
+    return Ok(new PgTableDescriptor(name, columns));
+  }
+  // Preferred schema-aware single-field planner. An arbitrary ColumnSpec
+  // alone is not enough to authorize a mutation of an undeclared column.
+  pub fnc plan_schema_update_field_checked(
+    PgTableDescriptor descriptor,
+    string field_name,
+    FieldChange change,
+    string workspace,
+    string id
+  ): Result<TypedPatchPlan, string> {
+    val columns = descriptor.columns();
+    if table_descriptor_checked(descriptor.name, columns).is_err() then
+      return Err("unadmitted or malformed table descriptor");
+    fi
+    if !admitted_identifier(field_name) then return Err("unadmitted patch field"); fi
+    let bool found = false;
+    let ColumnSpec field = new ColumnSpec("invalid", "text", false);
+    for (val column of columns) {
+      if column.name == field_name then
+        field = column;
+        found = true;
+      fi
+    }
+    if !found then return Err("patch field not declared in table schema"); fi
+    return plan_update_field_checked(descriptor.name, field, change, workspace, id);
   }
   // PgType is a bounded data descriptor. Runtime registry authorization and
   // code-generated nominal schema types remain separately required.

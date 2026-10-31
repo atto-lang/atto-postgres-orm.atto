@@ -103,3 +103,10 @@ falls short of a generated compile-time `Change<T>`, `PgType` enum, AOT
 schema capability, or complete wire codec. Typed schema generation,
 connection-generation fencing, actual PostgreSQL bind OIDs, and integration
 evidence remain future work. The guest fixtures are **not yet executed**.
+
+The source-local `PgTableDescriptor` now snapshots a verified list of
+`ColumnSpec` and checks required UUID id/workspace fields and duplicate
+names. The preferred schema-aware patch planner only admits columns from
+this snapshot. This is deliberately **not** generated schema evidence:
+a public constructor can be forged, so each use revalidates. True Diesel
+compile-time descriptor generation remains unimplemented.
