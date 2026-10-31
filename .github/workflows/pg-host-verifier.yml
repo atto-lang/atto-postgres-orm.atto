@@ -4,6 +4,10 @@ on:
     paths:
       - 'scripts/verify-native-plans'
       - 'scripts/ores'
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/negative/**'
+      - 'SOURCE_REF'
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - 'tests/pg17-ddl-contract.bash'
@@ -15,6 +19,10 @@ on:
     paths:
       - 'scripts/verify-native-plans'
       - 'scripts/ores'
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/negative/**'
+      - 'SOURCE_REF'
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - 'tests/pg17-ddl-contract.bash'
@@ -42,7 +50,7 @@ jobs:
           bash -n tests/verify-native-plans-host.bash
           bash -n tests/pg17-ddl-contract.bash
           bash -n tests/verify-pg17-ddl-host.bash
-      - name: Host-only failure-injection suites (10 verifier, 8 launcher, 9 SQL mocks)
+      - name: Host-only failure-injection suites (10 verifier, 11 launcher, 9 SQL mocks)
         shell: bash
         run: |
           set -euo pipefail
