@@ -157,6 +157,33 @@ pub routine main(): void {
   ], arr["id"], arr[
     pg.constraint_foreign_key(arr["id"], "workspaces", arr["schema.id"])
   ]).is_err() then panic("qualified FK referenced column admitted"); fi
+
+  // The renderer must distinguish different legal clauses and preserve order.
+  val distinct_rules = pg.table_typed_pk_constraints("records", arr[
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("code", "text", false)
+  ], arr["id"], arr[
+    pg.constraint_unique(arr["code"]),
+    pg.constraint_unique(arr["workspace_id", "code"]),
+    pg.constraint_foreign_key(arr["workspace_id"], "workspaces", arr["id"])
+  ]);
+  if distinct_rules.is_err() then panic("distinct constraint clauses incorrectly deduplicated"); fi
+  if distinct_rules.unwrap() != "CREATE TABLE \"records\" (\n  \"workspace_id\" uuid NOT NULL,\n  \"id\" uuid NOT NULL,\n  \"code\" text NOT NULL,\n  PRIMARY KEY (\"id\"),\n  UNIQUE (\"code\"),\n  UNIQUE (\"workspace_id\", \"code\"),\n  FOREIGN KEY (\"workspace_id\") REFERENCES \"workspaces\" (\"id\")\n);\n" then
+    panic("distinct constraint ordering or direct rendering changed");
+  fi
+  if !pg.table_typed_pk_constraints("records", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "workspaces", arr["id", "id"])
+  ]).is_err() then panic("mismatched repeated reference targets admitted"); fi
+  if !pg.table_typed_pk_constraints("records", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("code", "text", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id", "code"], "workspaces", arr["id", "id"])
+  ]).is_err() then panic("duplicate foreign referenced columns admitted"); fi
+
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
