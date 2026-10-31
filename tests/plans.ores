@@ -11,6 +11,18 @@ pub routine main(): void {
   if !pg.invalid_identifier_surface("line\nbreak") then panic("LF identifier surface admitted"); fi
   if !pg.invalid_identifier_surface("line\rbreak") then panic("CR identifier surface admitted"); fi
   if !pg.invalid_identifier_surface("line\tbreak") then panic("TAB identifier surface admitted"); fi
+  // Independent C0/DEL input catalog: reject every ASCII control byte.
+  for (val control of arr["\u0000", "\u0001", "\u0002", "\u0003", "\u0004", "\u0005", "\u0006", "\u0007", "\u0008", "\t", "\n", "\u000b", "\u000c", "\r", "\u000e", "\u000f", "\u0010", "\u0011", "\u0012", "\u0013", "\u0014", "\u0015", "\u0016", "\u0017", "\u0018", "\u0019", "\u001a", "\u001b", "\u001c", "\u001d", "\u001e", "\u001f", "\u007f"]) {
+    if !pg.invalid_identifier_surface("name" + control + "suffix") then
+      panic("legacy identifier admitted ASCII control byte");
+    fi
+    if !pg.column("name" + control + "suffix", "uuid", false).is_err() then
+      panic("legacy column admitted ASCII control byte");
+    fi
+  }
+  if pg.invalid_identifier_surface("safe_identifier_09") then
+    panic("legacy identifier unexpectedly rejects safe ASCII");
+  fi
   if !pg.column("line\nbreak", "text", false).is_err() then panic("LF column identifier admitted"); fi
   if !pg.column("line\tbreak", "uuid", false).is_err() then panic("TAB column identifier admitted"); fi
   if !pg.table_typed_pk("unsafe\rname", arr[
