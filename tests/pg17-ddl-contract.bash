@@ -27,6 +27,15 @@ schema="ores_pg_contract_${RANDOM}_${RANDOM}_$$"
 [[ "$schema" =~ ^[a-z0-9_]{1,63}$ ]] || fail 'invalid ephemeral schema name'
 result="$({ psql -X -q -A -t -v ON_ERROR_STOP=1 -v "contract_schema=$schema" "$PG_TEST_DSN" <<'SQL'
 BEGIN;
+-- Recheck the major inside the SAME connection/transaction as the DDL.
+DO $server_major$
+BEGIN
+  IF current_setting('server_version_num')::integer < 170000
+     OR current_setting('server_version_num')::integer >= 180000 THEN
+    RAISE EXCEPTION 'PostgreSQL 17 server required for SQL contract';
+  END IF;
+END
+$server_major$;
 CREATE SCHEMA :"contract_schema";
 SET LOCAL search_path TO :"contract_schema", pg_catalog;
 
