@@ -42,6 +42,14 @@ pub routine main(): void {
   if !pg.table_typed_pk("runs", arr[
     pg.column_spec("", "uuid", false)
   ], arr[""]).is_err() then panic("empty typed column admitted"); fi
+  if !pg.table_typed_pk("runs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr[""]).is_err() then panic("empty primary-key identifier admitted"); fi
+  val typed_quoted = pg.table_typed_pk("runs\"; --", arr[
+    pg.column_spec("id\"", "uuid", false)
+  ], arr["id\""]);
+  if typed_quoted.is_err() then panic("quoted identifier rejected by typed DDL"); fi
+  if typed_quoted.unwrap() != "CREATE TABLE \"runs\"\"; --\" (\n  \"id\"\"\" uuid NOT NULL,\n  PRIMARY KEY (\"id\"\"\")\n);\n" then panic("typed identifier quote escaping"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
