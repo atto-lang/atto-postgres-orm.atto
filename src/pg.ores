@@ -373,6 +373,28 @@ define module pg as
     if !admitted_db_value(value) then return Err("unadmitted PostgreSQL bind value"); fi
     return Ok(value);
   }
+  // The only public typed plan adapter accepts exactly two admitted,
+  // non-null UUID-tagged values and snapshots them before returning.
+  // Not an authorization capability: every future execution rechecks binds.
+  pub fnc workspace_typed_values_checked(
+    string table, Array<DbValue> values
+  ): Result<TypedQueryPlan, string> {
+    if !admitted_identifier(table) then
+      return Err("unadmitted PostgreSQL query table identifier");
+    fi
+    if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
+    for (val value of values) {
+      if !admitted_db_value(value) then
+        return Err("unadmitted PostgreSQL bind value");
+      fi
+      if value.kind != "uuid" || value.is_null then
+        return Err("workspace query requires non-null UUID binds");
+      fi
+    }
+    return Ok(new TypedQueryPlan(
+      "SELECT * FROM " + ident(table)
+        + " WHERE workspace_id = $1::uuid AND id = $2::uuid", values));
+  }
   // Only a vetted fixed SQL template is exported here: caller data stays
   // in the two typed bind slots and never affects SQL text. Workspace data
   // does NOT authenticate the caller; a future driver must enforce tenant
@@ -380,15 +402,10 @@ define module pg as
   pub fnc find_in_workspace_typed_plan_checked(
     string table, string workspace, string id
   ): Result<TypedQueryPlan, string> {
-    if !admitted_identifier(table) then
-      return Err("unadmitted PostgreSQL query table identifier");
-    fi
     let Array<DbValue> binds = arr[
       new DbValue("uuid", workspace, false),
       new DbValue("uuid", id, false)
     ];
-    return Ok(new TypedQueryPlan(
-      "SELECT * FROM " + ident(table)
-        + " WHERE workspace_id = $1::uuid AND id = $2::uuid", binds));
+    return workspace_typed_values_checked(table, binds);
   }
 end
