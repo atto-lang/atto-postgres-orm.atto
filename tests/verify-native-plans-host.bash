@@ -2,6 +2,14 @@
 # Host-only fake-compiler admission/oracle tests. NEVER native guest evidence.
 set -euo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+# Bind the mock oracle to the authored guest path and actual panic strings.
+# This is static consistency, NOT compilation or runtime observation.
+grep -Fq 'panic("invalid PostgreSQL identifier surface")' "$root/src/pg.ores"
+grep -Fq 'panic("PostgreSQL table requires at least one column")' "$root/src/pg.ores"
+grep -Fq 'pg.find_in_workspace("",' "$root/tests/negative/empty_identifier.ores"
+grep -Fq 'pg.table("no_columns", arr[], arr[])' "$root/tests/negative/empty_table.ores"
+grep -Fq "run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'" "$root/scripts/verify-native-plans"
+grep -Fq "run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'" "$root/scripts/verify-native-plans"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-harness-mock.XXXXXXXX")"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/orm/scripts" "$work/orm/src" "$work/orm/tests/negative" "$work/compiler" "$work/bin"
@@ -14,7 +22,12 @@ case "$1" in
     echo 'Postgres SQL planning contracts passed'; exit 0;;
   tests/negative/empty_identifier.ores)
     if [[ "${MOCK_SKIP_SENTINEL:-}" != yes ]]; then echo PG_NEGATIVE_EMPTY_IDENTIFIER_STARTED; fi
-    echo 'empty PostgreSQL identifier' >&2; exit 17;;
+    if [[ "${MOCK_WRONG_DIAGNOSTIC:-}" == yes ]]; then
+      echo 'empty PostgreSQL identifier' >&2
+    else
+      echo 'invalid PostgreSQL identifier surface' >&2
+    fi
+    exit 17;;
   tests/negative/empty_table.ores)
     echo PG_NEGATIVE_EMPTY_TABLE_STARTED
     echo 'PostgreSQL table requires at least one column' >&2; exit 18;;
@@ -77,6 +90,9 @@ run_case normal-mocked-oracles pass
 export MOCK_SKIP_SENTINEL=yes
 run_case missing-negative-sentinel reject
 unset MOCK_SKIP_SENTINEL
+export MOCK_WRONG_DIAGNOSTIC=yes
+run_case wrong-negative-diagnostic reject
+unset MOCK_WRONG_DIAGNOSTIC
 export MOCK_MAVEN_VERSION=21.0.12
 run_case wrong-maven-java reject
 unset MOCK_MAVEN_VERSION
@@ -98,4 +114,4 @@ run_case ignored-compiler-input reject
 rm "$work/compiler/src/ignored-compiler.java"
 printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
 run_case dirty-worktree reject
-echo 'MOCK_HOST_GATE_SCENARIOS=9/9 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
+echo 'MOCK_HOST_GATE_SCENARIOS=10/10 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
