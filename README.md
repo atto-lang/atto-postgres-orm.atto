@@ -174,7 +174,7 @@ validation and remain **trusted-only**.
 canonical `CREATE TABLE "docs"` SQL against an **explicitly disposable**
 PostgreSQL database. It asserts UNIQUE, foreign-key, NOT NULL, composite
 primary-key enforcement, executes `ROLLBACK`, and checks the ephemeral schema
-was not retained. It fails before connecting unless the native fixture still
+was not retained. Before running SQL it verifies the actual server's `server_version_num` is PostgreSQL 17 (not merely the local client version). It fails before connecting unless the native fixture still
 contains the same SQL golden and the caller provides both opt-in variables:
 
 ```sh
@@ -186,8 +186,10 @@ bash tests/pg17-ddl-contract.bash
 The `pg17-ddl-integration.yml` workflow provisions a disposable PostgreSQL 17
 service when Actions runners are admitted. The `pg-host-verifier.yml` workflow
 runs `bash tests/verify-pg17-ddl-host.bash` with fake `psql`, testing fail-closed
-admission and rollback-output checks. The latter suite passed **5/5 local
-host/mock scenarios** against byte-verified GitHub blobs. **No live PostgreSQL
+admission, rollback-output, and PostgreSQL server-major checks. The updated
+suite passed **9/9 local host/mock scenarios**, including rejecting server
+versions 16 and 18, malformed version output, and failed version inspection,
+against exact, byte-verified GitHub blobs. **No live PostgreSQL
 server, native Oreslang compiler or real driver was executed locally**, and a
 zero-step GitHub job cannot count as execution. This SQL-only test does not
 authenticate tenants or establish RLS, migrations, driver correctness, or
