@@ -63,7 +63,7 @@ expect_sqlstate 22003 bigint_overflow \
   "PREPARE bad_bigint(bigint) AS SELECT \$1; EXECUTE bad_bigint('9223372036854775808');"
 expect_sqlstate 22P02 invalid_boolean \
   "PREPARE bad_bool(boolean) AS SELECT \$1; EXECUTE bad_bool('truthy');"
-expect_sqlstate 22P02 invalid_bytea \
+expect_sqlstate 22023 invalid_bytea \
   "PREPARE bad_bytea(bytea) AS SELECT \$1; EXECUTE bad_bytea('\x0');"
 
 printf '%s\n' 'PG_BIND_FAILURES_SQL_ONLY_PASS'
