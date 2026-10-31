@@ -123,6 +123,12 @@ define module pg as
     }
     return sql + "\n);\n";
   }
+  // Restricted table admission only. Workspace text is NOT tenant authority,
+  // and Query.params is still actor-local mutable data, not an owned plan.
+  pub fnc find_in_workspace_checked(string table, string workspace, string id): Result<Query, string> {
+    if !admitted_identifier(table) then return Err("unadmitted PostgreSQL query table identifier"); fi
+    return Ok(find_in_workspace(table, workspace, id));
+  }
   pub fnc find_in_workspace(string table, string workspace, string id): Query {
     return new Query("SELECT * FROM " + ident(table)
       + " WHERE workspace_id = $1::uuid AND id = $2::uuid", arr[workspace, id]);
