@@ -103,7 +103,7 @@ There is no implicit migration from that API to the typed builder.
 Constraint strings and pre-rendered column strings are explicitly **trusted,
 source-authored SQL**. They must never receive user input. The restricted
 typed DDL path has stronger identifier admission than the legacy string API;
-the legacy admission boundary still requires NUL/C0 and UTF-8-length checks
+the legacy admission boundary now rejects ASCII C0, NUL and DEL but still lacks PostgreSQL's UTF-8 byte-length check
 before executing arbitrary quoted names.
 Query values never become SQL text. UUID parameters are cast by PostgreSQL rather
 than interpolated. `Query.params` is an actor-local array; do not share mutable
@@ -131,7 +131,7 @@ ORES_JAVA=/absolute/path/to/jdk25/bin/java \
 ```
 
 The harness rebuilds the pinned compiler, records source and artifact SHA-256
-identity, runs the positive and both separate negative guest processes, and
+identity, runs one positive and three independent negative guest processes, and
 refuses to certify a negative failure unless the guest printed its own runtime
 start sentinel before the expected panic. The evidence files are stored outside
 the repo and **cannot substitute for independently executed CI job steps**.
@@ -155,3 +155,15 @@ Next: typed DbValue/DbRow and error surfaces, actor-confined prepared statements
 transactions and cancellation, bounded row streams, pool ownership, generated
 row codecs, and live PostgreSQL driver conformance. No unsupported driver is
 presented as implemented.
+
+### C0/DEL legacy identifier hardening (guest execution pending)
+
+`invalid_identifier_surface`, `ident` and `column` now reject all 32 ASCII
+C0 controls (including NUL) and DEL before building SQL. The independent
+`tests/plans.ores` catalog checks all 33 inputs, and
+`tests/negative/control_identifier.ores` requires a separate guest panic
+with the precise start marker. `scripts/verify-native-plans` now binds and
+hashes that fourth guest's input. These source-level checks were inspected,
+but the modified native/host guest suite has not been executed at this head.
+Legacy quoted identifiers still lack complete PostgreSQL 63-byte UTF-8
+validation and remain **trusted-only**.
