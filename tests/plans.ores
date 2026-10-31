@@ -266,7 +266,7 @@ pub routine main(): void {
   val typed_bind_plan = pg.find_in_workspace_typed_plan_checked(
     "runs", "hostile' OR true--", "record-1");
   if typed_bind_plan.is_err() then panic("typed bind plan rejected admitted table"); fi
-  if typed_bind_plan.unwrap().sql != "SELECT * FROM \\"runs\\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then
+  if typed_bind_plan.unwrap().sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then
     panic("typed bind SQL template changed");
   fi
   if typed_bind_plan.unwrap().param_count() != 2 then panic("typed bind count"); fi
@@ -297,10 +297,10 @@ pub routine main(): void {
   if safe_text_bind.unwrap().scalar != "'); DROP TABLE runs;--" then
     panic("text bind value changed");
   fi
-  if !pg.checked_db_value("bytea", "", true).is_ok() then
+  if pg.checked_db_value("bytea", "", true).is_err() then
     panic("typed NULL bytea rejected");
   fi
-  if !pg.checked_db_value("text", "", false).is_ok() then
+  if pg.checked_db_value("text", "", false).is_err() then
     panic("empty non-NULL text parameter rejected");
   fi
   stdio.println("Postgres SQL planning contracts passed");
