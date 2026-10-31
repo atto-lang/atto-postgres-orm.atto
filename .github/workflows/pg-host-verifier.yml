@@ -36,7 +36,7 @@ jobs:
           bash -n tests/verify-launcher-host.bash
           bash -n scripts/verify-native-plans
           bash -n tests/verify-native-plans-host.bash
-      - name: Nine verifier and eight launcher host-only failure-injection suites
+      - name: Ten verifier and eight launcher host-only failure-injection suites
         shell: bash
         run: |
           set -euo pipefail
