@@ -12,6 +12,10 @@ Status: architecture and acceptance criteria, aligned with draft PR #4 and #6. T
 | Drizzle | SQL-first compositional expressions | typed column references, explicit joins, predicates, ordering, parameters and inspectable canonical SQL AST |
 | Prisma | schema contract, typed queries and migrations | deterministic schema snapshot + generated query model, migration diff / drift detection / dry-run and destructive-change review |
 | TypeORM | repositories, relations, unit-of-work/transactions | typed repository facade; explicit async calls, explicit relation load policies, no hidden network I/O or implicit lazy proxy |
+| Diesel | compiler-checked schema/query DSL, projections, migrations | AOT typed descriptors, compile-fail test matrix, checked expression/decoder compatibility, exact schema and migration receipts |
+| SeaORM 2.0 | async ActiveModel state, smart relation loading, entity-first/schema-first tooling | explicit NotSet/Unchanged/Set(Option<T>) patch algebra; bounded opt-in relation JOIN/batch loading, actor-owned async transactions |
+
+Diesel and SeaORM are complementary rather than substitutes. Static descriptors are the default, and dynamic query builders are limited to an authenticated schema capability. SeaORM-style mutable tracked models must not cross actor/heap boundaries by shared reference; freeze typed snapshots before handoff. `Option<T>` alone is not a PATCH state: omit vs explicit SQL NULL vs unchanged are separate. See [Diesel + SeaORM adoption](DIESEL_SEAORM_ADOPTION.md) and [acceptance matrix](../tests/DIESEL_SEAORM_ACCEPTANCE.md).
 
 ## Boundaries: what may cross each interface
 
@@ -39,6 +43,9 @@ Status: architecture and acceptance criteria, aligned with draft PR #4 and #6. T
 | P0 | Driver-side typed bind/row codec boundary | native guest + disposable PostgreSQL: injections in VALUES/ORDER fields, invalid UUID, nullability, numeric overflow, bytea/jsonb round-trip |
 | P0 | Tenant authority, RLS and transaction fencing | two tenants, app role without bypass, forced RLS, aborted tx/cancellation, stale generation and pool reuse attempts |
 | P0 | Source/proof integrity | exact ORM head/tree plus pinned compiler SOURCE_REF and compiled artifact hashes; nonzero executed workflow steps; no zero-step pass claims |
+| P0 | Diesel-style schema + projection type checking | compile-fail tests for incompatible column/value, nullability, join scope and row decoder shape, with specific expected diagnostics |
+| P1 | SeaORM-style change tracking | golden SQL + typed binds for NotSet vs Unchanged vs Set(Some) vs Set(None), explicit null and unauthorized updates |
+| P1 | Relation loader and nested-write isolation | bounded JOIN/batch counts, N+1 regression, cross-tenant relation denial, nested transaction rollback/cancellation |
 | P1 | AOT Zorde/Serde codec adapter | compile-time invalid model tests; bounded structured issues and strict decode of rows on every backend |
 | P1 | Query builder and migrations | SQL golden/property tests, joins/relations, drift/destructive-change dry-runs and PostgreSQL rollback |
 | P1 | Availability and operability | bounded streaming, deadlines, cancellation under load, redaction and no actor cross-heap aliasing |
@@ -46,5 +53,7 @@ Status: architecture and acceptance criteria, aligned with draft PR #4 and #6. T
 ## Near-term implementation order
 
 First close the identifier residual/sentinel check and preserve the existing stacked draft APIs; next add a closed PgType/DbValue algebra, schema-owned identifiers, codec Result errors, and driver capability model. Wire a real native PostgreSQL client only after ownership/transaction semantics are executable. Once those exist, implement generated model/repository surfaces, relational predicates, and safe migrations. Keep runtime and release claims false until tests execute against an actual PostgreSQL instance.
+
+Diesel/SeaORM reference and test links: https://docs.rs/diesel/latest/diesel/ ; https://www.sea-ql.org/SeaORM/docs/basic-crud/active-model/ ; https://www.sea-ql.org/SeaORM/docs/advanced-query/transaction/ . These are design inputs only.
 
 References: https://zod.dev/basics ; https://serde.rs/data-model.html ; https://typeorm.io/docs/getting-started/ ; https://www.prisma.io/docs/orm ; https://orm.drizzle.team/docs/data-querying ; https://www.postgresql.org/docs/17/ddl-rowsecurity.html . Zorde's exact project API must be checked in its source rather than guessed.

@@ -208,3 +208,7 @@ positive nor negative planner tests prove SQL execution or tenant isolation.
 Keep Rust receipt-inspector host tests and Oreslang guest/backend test evidence
 as **separate** classes. A syntactically consistent TSV receipt cannot certify
 that the GitHub job or compiler actually executed.
+
+## Future Diesel/SeaORM generated-ORM acceptance suite (NOT EXECUTED)
+
+The [separate compile-fail, ActiveModel, relation and migration matrix](DIESEL_SEAORM_ACCEPTANCE.md) adds static type-safety, SQL/bind, tenant and cancellation gates. These are **specifications only**: the AOT schema descriptors, driver and generated model APIs must first be implemented and then exercised by actual nonzero-step native guest and PostgreSQL runs. Existing planner negative tests are not evidence for these new features.

@@ -16,6 +16,18 @@ val query = pg.find_in_workspace_checked("workflows", workspace_id, workflow_id)
 // Adapter executes query.sql and binds query.params separately.
 ```
 
+## ORM roadmap: Diesel + SeaORM (design only)
+
+The current module is a checked SQL planner **without a database executor**.
+The planned native ORM combines Diesel's compile-time schema/query checking
+with SeaORM 2.0's explicit `NotSet` / `Unchanged` / `Set` change states,
+async actor-owned transactions and bounded explicit relation loading. Neither
+the generated model API nor the connection/driver API exists yet.
+
+- [Full Diesel + SeaORM adoption design](docs/DIESEL_SEAORM_ADOPTION.md)
+- [Compile-fail, patch, relation and migration acceptance matrix](tests/DIESEL_SEAORM_ACCEPTANCE.md)
+- [Zod/Zorde/Serde/TypeORM/Prisma/Drizzle integration contract](docs/ORM_HARDENING_CONTRACT.md)
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and
