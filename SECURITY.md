@@ -27,7 +27,10 @@ a scope and release-gating contract, not certification.
    mutable actor-local array. No cross-actor sharing, reuse after handoff,
    or assumption of a deep copy is allowed. The driver must implement owned,
    immutable typed bound values and reject stale connection generations.
-5. `find_in_workspace(table, workspace, id)` is SQL planning, not tenant
+5. `find_in_workspace_checked(table, workspace, id)` admits only the same
+   bounded ASCII table identifiers as the typed DDL API and keeps values
+   separate from SQL. The original `find_in_workspace` remains legacy and
+   lacks complete identifier admission. Neither method is tenant
    authentication. A caller-provided workspace string is not authority.
    The execution adapter must bind tenant identity to an authenticated
    capability and configure independent PostgreSQL role/RLS restrictions.
