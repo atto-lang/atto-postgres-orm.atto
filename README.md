@@ -140,7 +140,16 @@ is claimed for this PR until real receipts and job logs are reviewed.
 
 The compiler must first be built with Maven, including a `target/classpath.txt`:
 `mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt`.
-The launcher verifies the revision and rejects tracked compiler modifications.
+The launcher now **fails closed** if an explicitly chosen `ORES_JAVA` is
+missing or is not Java 25, if the compiler SHA differs from `SOURCE_REF`,
+if compiler source is dirty/untracked/ignored, or if compiled
+`OresMain.class` or its generated classpath is missing. It never silently
+falls back from a supplied `ORES_JAVA` to an arbitrary system runtime.
+
+Run host-only launcher preflight tests with
+`bash tests/verify-launcher-host.bash`; eight mocked test cases passed
+locally against the exact launcher and test blobs. This is **not**
+Oreslang guest execution or PostgreSQL integration evidence.
 
 Next: typed DbValue/DbRow and error surfaces, actor-confined prepared statements,
 transactions and cancellation, bounded row streams, pool ownership, generated
