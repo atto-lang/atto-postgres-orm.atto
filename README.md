@@ -32,8 +32,9 @@ val ddl = pg.table_typed_pk("workflows", arr[
 ], arr["workspace_id", "id"]);
 ```
 
-This **does not** establish safe database execution. PostgreSQL identifier
-admission (NUL, control characters, UTF-8 byte-length limits), other DDL
+This **does not** establish safe database execution. The planner rejects
+empty names and LF/CR/TAB surfaces, but PostgreSQL identifier admission still
+requires a complete C0/NUL policy and UTF-8 byte-length validation. Other DDL
 constraints, tenant capabilities, connection driver, transactions, RLS and live
 PostgreSQL tests remain release blockers. Callers must not feed untrusted
 identifiers or mutable query plans to an execution adapter.
