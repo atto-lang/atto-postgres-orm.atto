@@ -51,9 +51,18 @@ run_case java-21-rejected reject
 export ORES_JAVA="$work/bin/java25"
 mv "$work/compiler/target/classpath.txt" "$work/classpath.bak"
 run_case classpath-missing reject
+printf '/mock/stale.jar\n' > "$work/compiler/target/no-zalgo-classpath.txt"
+run_case stale-fallback-classpath-rejected reject
+rm "$work/compiler/target/no-zalgo-classpath.txt"
+ln -s "$work/classpath.bak" "$work/compiler/target/classpath.txt"
+run_case symlinked-classpath-rejected reject
+rm "$work/compiler/target/classpath.txt"
 mv "$work/classpath.bak" "$work/compiler/target/classpath.txt"
 mv "$work/compiler/target/classes/dev/oreslang/launcher/OresMain.class" "$work/launcher.bak"
 run_case launcher-class-missing reject
+ln -s "$work/launcher.bak" "$work/compiler/target/classes/dev/oreslang/launcher/OresMain.class"
+run_case symlinked-launcher-class-rejected reject
+rm "$work/compiler/target/classes/dev/oreslang/launcher/OresMain.class"
 mv "$work/launcher.bak" "$work/compiler/target/classes/dev/oreslang/launcher/OresMain.class"
 printf '0%.0s' {1..40} > "$work/orm/SOURCE_REF"
 run_case compiler-sha-mismatch reject
@@ -68,5 +77,5 @@ printf 'src/ignored.java\n' > "$work/compiler/.gitignore"
 git -C "$work/compiler" rev-parse HEAD > "$work/orm/SOURCE_REF"
 printf 'IGNORED BUILD INPUT\n' > "$work/compiler/src/ignored.java"
 run_case ignored-compiler-input reject
-[[ "$count" -eq 8 ]] || { echo "Expected 8 cases; got $count" >&2; exit 1; }
-echo 'HOST_ONLY_LAUNCHER_TESTS=8/8 PASS (NO NATIVE EXECUTION)'
+[[ "$count" -eq 11 ]] || { echo "Expected 11 cases; got $count" >&2; exit 1; }
+echo 'HOST_ONLY_LAUNCHER_TESTS=11/11 PASS (NO NATIVE EXECUTION)'
