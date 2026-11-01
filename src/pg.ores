@@ -179,8 +179,32 @@ define module pg as
   pub fnc constraint_unique(Array<string> columns): ConstraintSpec {
     return new ConstraintSpec("unique", columns, "", arr[]);
   }
+  // Borrowed variants preserve caller ownership while taking an independent
+  // data snapshot. Use these when the caller must keep using its Array.
+  pub fnc constraint_unique_borrowed(borrow Array<string> columns): ConstraintSpec {
+    let Array<string> copy = arr[];
+    for (val column_name of columns) {
+      copy.add(column_name);
+    }
+    return new ConstraintSpec("unique", copy, "", arr[]);
+  }
   pub fnc constraint_foreign_key(Array<string> columns, string reference_table, Array<string> reference_columns): ConstraintSpec {
     return new ConstraintSpec("foreign_key", columns, reference_table, reference_columns);
+  }
+  pub fnc constraint_foreign_key_borrowed(
+    borrow Array<string> columns,
+    string reference_table,
+    borrow Array<string> reference_columns
+  ): ConstraintSpec {
+    let Array<string> local_copy = arr[];
+    for (val column_name of columns) {
+      local_copy.add(column_name);
+    }
+    let Array<string> reference_copy = arr[];
+    for (val reference_name of reference_columns) {
+      reference_copy.add(reference_name);
+    }
+    return new ConstraintSpec("foreign_key", local_copy, reference_table, reference_copy);
   }
   // One direct, deterministic renderer owns typed PK, UNIQUE and FK output.
   // No string surgery on completed SQL and no caller-provided SQL fragments.
@@ -344,6 +368,13 @@ define module pg as
   pub fnc snapshot_legacy_query(Query query): QueryPlan {
     return new QueryPlan(query.sql, query.params);
   }
+  pub fnc snapshot_legacy_query_borrowed(borrow Query query): QueryPlan {
+    let Array<string> copy = arr[];
+    for (val param of query.params) {
+      copy.add(param);
+    }
+    return new QueryPlan(query.sql, copy);
+  }
   // Restricted table admission only. Workspace text is NOT tenant authority,
   // and Query.params is still actor-local mutable data, not an owned plan.
   pub fnc find_in_workspace_checked(string table, string workspace, string id): Result<Query, string> {
@@ -394,6 +425,27 @@ define module pg as
     return Ok(new TypedQueryPlan(
       "SELECT * FROM " + ident(table)
         + " WHERE workspace_id = $1::uuid AND id = $2::uuid", values));
+  }
+  pub fnc workspace_typed_values_borrowed_checked(
+    string table, borrow Array<DbValue> values
+  ): Result<TypedQueryPlan, string> {
+    if !admitted_identifier(table) then
+      return Err("unadmitted PostgreSQL query table identifier");
+    fi
+    if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
+    let Array<DbValue> copy = arr[];
+    for (val value of values) {
+      if !admitted_db_value(value) then
+        return Err("unadmitted PostgreSQL bind value");
+      fi
+      if value.kind != "uuid" || value.is_null then
+        return Err("workspace query requires non-null UUID binds");
+      fi
+      copy.add(value);
+    }
+    return Ok(new TypedQueryPlan(
+      "SELECT * FROM " + ident(table)
+        + " WHERE workspace_id = $1::uuid AND id = $2::uuid", copy));
   }
   // Only a vetted fixed SQL template is exported here: caller data stays
   // in the two typed bind slots and never affects SQL text. Workspace data
