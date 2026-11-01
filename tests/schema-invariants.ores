@@ -107,6 +107,20 @@ pub routine main(): void {
   if !schema.review_manifest_preview_checked(rt borrow forged_op).is_err() then panic("executable SQL op forged into review"); fi
   val forged_scope = new SchemaPlan(arr[new SchemaStep("review_create_table","alpha","key","manual")]);
   if !schema.review_manifest_preview_checked(rt borrow forged_scope).is_err() then panic("table operation admitted column ID"); fi
+  // Multiple matched stable-ID tables must diff in desired order without
+  // temporary placeholder tables or inferred physical-name matching.
+  val beta_next_r = schema.table_checked("beta","physical_beta",arr[key,opt]);
+  if beta_next_r.is_err() then panic("second matched table fixture rejected"); fi
+  val both_extended_r = schema.catalog_checked(arr[extra_r.unwrap(),beta_next_r.unwrap()]);
+  if both_extended_r.is_err() then panic("two matched table catalog rejected"); fi
+  val both_extended = both_extended_r.unwrap();
+  val both_changes = schema.diff_catalog_checked(rt borrow both_extended,rt borrow ab);
+  if both_changes.is_err() then panic("two matched table diff rejected"); fi
+  if both_changes.unwrap().step_count() != 2 then panic("two matched table diff lost a change"); fi
+  if both_changes.unwrap().step_at(0).unwrap().table_id != "alpha" then panic("first matched table order changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().table_id != "beta" then panic("second matched table order changed"); fi
+  if both_changes.unwrap().step_at(0).unwrap().op != "add_nullable_column" then panic("first matched table operation changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().risk != "safe" then panic("second matched table risk changed"); fi
   // Pure Oreslang checked risk diagnostics: cannot grant SQL authority.
   val safe_plan = new SchemaPlan(arr[
     new SchemaStep("add_nullable_column","alpha","optional","safe"),
