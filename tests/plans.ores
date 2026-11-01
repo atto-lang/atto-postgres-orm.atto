@@ -350,7 +350,8 @@ pub routine main(): void {
     || null_i32.unwrap().get(3) != 255 then
     panic("PostgreSQL NULL i32 encoding mismatch");
   fi
-  if !pg.wire_i32_be(-2).is_err() then panic("invalid negative wire i32 admitted"); fi
+  if pg.wire_i32_be(-2).is_err() then panic("signed negative wire i32 rejected"); fi
+  if !pg.wire_i32_be(-2147483649).is_err() then panic("wire i32 below signed minimum admitted"); fi
 
   val utf8_cstring = pg.wire_cstring("é😀");
   if utf8_cstring.is_err() then panic("valid UTF-8 PostgreSQL C-string rejected"); fi
@@ -480,6 +481,22 @@ pub routine main(): void {
     || key_data.unwrap().secret_key != 456 then
     panic("BackendKeyData decode mismatch");
   fi
+
+  val cancel_request = pg.wire_cancel_request(key_data.unwrap());
+  if cancel_request.is_err() then panic("valid PostgreSQL CancelRequest rejected"); fi
+  val List<int> cancel_expected = [
+    0, 0, 0, 16,
+    4, 210, 22, 46,
+    0, 0, 0, 123,
+    0, 0, 1, 200
+  ];
+  val cancel_wire = cancel_request.unwrap();
+  if cancel_wire.size != cancel_expected.size then panic("CancelRequest length mismatch"); fi
+  for (let int cancel_index = 0; cancel_index < cancel_expected.size; cancel_index++) {
+    if cancel_wire.get(cancel_index) != cancel_expected.get(cancel_index) then
+      panic("CancelRequest byte mismatch");
+    fi
+  }
 
   val ready_frame = pg.wire_backend_frame_checked([90, 0, 0, 0, 5, 73]);
   if ready_frame.is_err() then panic("ReadyForQuery frame rejected"); fi
