@@ -19,7 +19,7 @@ grep -Fq 'for (val control of arr[' "$root/src/pg.ores"
 grep -Fq 'for (val control of arr[' "$root/tests/plans.ores"
 # An is_identifier result is not proof of the stricter ASCII-only contract.
 # Verify the typed renderer rejects every character left by the ASCII map.
-grep -Fq 'if name.replace_literal("|", "") != name then return false; fi' "$root/src/pg.ores"
+grep -Fq 'if name == "" || name.replace_literal("|", "") != name then return false; fi' "$root/src/pg.ores"
 grep -Fq 'if mapped.replace_literal("|", "") != "" then return false; fi' "$root/src/pg.ores"
 grep -Fq 'if pg.admitted_identifier("nameé")' "$root/tests/plans.ores"
 grep -Fq 'if pg.admitted_identifier("Ωname")' "$root/tests/plans.ores"
