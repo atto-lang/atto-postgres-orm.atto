@@ -736,11 +736,12 @@ define module pg as
     return Ok([(value >> 8) & 255, value & 255]);
   }
 
-  // Permit -1 only for PostgreSQL NULL parameter lengths; ordinary lengths
-  // must remain non-negative signed i32 values.
+  // Generic PostgreSQL Int32 encoder. Length-bearing call sites perform
+  // their own non-negative/-1 validation; BackendKeyData cancellation secrets
+  // may legitimately occupy the full signed 32-bit domain.
   pub fnc wire_i32_be(int value): Result<List<int>, string> {
-    if value < -1 || value > 2147483647 then
-      return Err("PostgreSQL wire i32 outside supported range");
+    if value < -2147483648 || value > 2147483647 then
+      return Err("PostgreSQL wire i32 outside signed range");
     fi
     return Ok([
       (value >> 24) & 255,
@@ -924,6 +925,28 @@ define module pg as
 
   pub fnc wire_sync_message(): List<int> {
     return [83, 0, 0, 0, 4];
+  }
+
+  // CancelRequest is a separate connection startup packet with no type byte.
+  // PostgreSQL authenticates it with the backend process id + secret from
+  // BackendKeyData. The cancel socket receives no protocol response.
+  pub fnc wire_cancel_request(PgBackendKeyData key_data): Result<List<int>, string> {
+    if key_data.process_id <= 0 || key_data.process_id > 2147483647 then
+      return Err("invalid PostgreSQL backend process id");
+    fi
+    val length = wire_i32_be(16);
+    val code = wire_i32_be(80877102);
+    val process_id = wire_i32_be(key_data.process_id);
+    val secret = wire_i32_be(key_data.secret_key);
+    if length.is_err() || code.is_err() || process_id.is_err() || secret.is_err() then
+      return Err("invalid PostgreSQL CancelRequest identity");
+    fi
+    let mut List<int> frame = [];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of code.unwrap()) { frame.add(b); }
+    for (val b of process_id.unwrap()) { frame.add(b); }
+    for (val b of secret.unwrap()) { frame.add(b); }
+    return Ok(frame);
   }
 
   pub fnc wire_byte_checked(borrow List<int> bytes, int index): Result<int, string> {
