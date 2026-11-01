@@ -1,0 +1,29 @@
+{
+  "schema_version": "ores.orm.catalog/v1",
+  "tables": [
+    {
+      "stable_id": "users",
+      "name": "users",
+      "columns": [
+        {
+          "stable_id": "id",
+          "name": "id",
+          "kind": "uuid",
+          "nullable": false
+        },
+        {
+          "stable_id": "name",
+          "name": "name",
+          "kind": "string",
+          "nullable": false
+        },
+        {
+          "stable_id": "legacy",
+          "name": "legacy",
+          "kind": "string",
+          "nullable": true
+        }
+      ]
+    }
+  ]
+}

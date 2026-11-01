@@ -1,0 +1,105 @@
+import module schema from '../src/schema';
+pub routine main(): void {
+  if !schema.admitted_name("workspace_id") then panic("valid portable identity rejected"); fi
+  if schema.admitted_name("public.users") then panic("qualified identifier admitted"); fi
+  if schema.admitted_name("users|drop") then panic("sentinel admitted"); fi
+  if schema.admitted_name("usér") then panic("Unicode identifier admitted"); fi
+  if schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then
+    panic("64-byte identifier admitted");
+  fi
+  if !schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then
+    panic("63-byte identifier rejected");
+  fi
+  if schema.admitted_kind("text; DROP TABLE users") then panic("SQL type admitted"); fi
+  if !schema.admitted_kind("string") then panic("neutral string kind rejected"); fi
+
+  val current = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val wanted = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "display_name", "string", false),
+    schema.column("email", "email", "string", true),
+    schema.column("flag", "flag", "boolean", false)
+  ]);
+  if current.is_err() || wanted.is_err() then panic("valid neutral schema rejected"); fi
+  val wanted_table = wanted.unwrap();
+  val current_table = current.unwrap();
+  val plan = schema.diff_checked(rt borrow wanted_table, rt borrow current_table);
+  if plan.is_err() then panic("reviewable diff rejected"); fi
+  if plan.unwrap().step_count() != 4 then panic("unexpected schema plan count"); fi
+  if plan.unwrap().step_at(0).unwrap().op != "review_column_rename" then
+    panic("stable-id rename was not flagged");
+  fi
+  if plan.unwrap().step_at(1).unwrap().op != "add_nullable_column" then
+    panic("safe nullable addition missing");
+  fi
+  if plan.unwrap().step_at(2).unwrap().risk != "preflight" then
+    panic("required addition was not gated");
+  fi
+  if plan.unwrap().step_at(3).unwrap().risk != "destructive" then
+    panic("drop was not classified destructive");
+  fi
+  if !plan.unwrap().has_blockers() then panic("unsafe plan marked safe"); fi
+  if !plan.unwrap().step_at(-1).is_err() then panic("negative plan index admitted"); fi
+  if !plan.unwrap().step_at(4).is_err() then panic("overrun plan index admitted"); fi
+
+  val identical = schema.diff_checked(rt borrow current_table, rt borrow current_table);
+  if identical.is_err() || identical.unwrap().step_count() != 0 then
+    panic("identical catalog drift detected");
+  fi
+  val relaxed = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", true),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val relaxed_table = relaxed.unwrap();
+  val relaxed_plan = schema.diff_checked(rt borrow relaxed_table, rt borrow current_table);
+  if relaxed_plan.is_err() || relaxed_plan.unwrap().step_count() != 1 then
+    panic("nullable relaxation not planned");
+  fi
+  if relaxed_plan.unwrap().step_at(0).unwrap().op != "drop_not_null" then
+    panic("nullable relaxation operation changed");
+  fi
+
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("id", "other", "uuid", false)
+  ]).is_err() then panic("duplicate stable column id admitted"); fi
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("other", "id", "uuid", false)
+  ]).is_err() then panic("duplicate column name admitted"); fi
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "DROP TABLE", false)
+  ]).is_err() then panic("unsupported logical type admitted"); fi
+  if !schema.table_checked("users", "users", arr[]).is_err() then panic("empty table admitted"); fi
+
+  val corrupted_mapping = schema.table_checked("users", "users", arr[
+    schema.column("other_id", "id", "uuid", false),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val corrupted_table = corrupted_mapping.unwrap();
+  if !schema.diff_checked(rt borrow current_table, rt borrow corrupted_table).is_err() then
+    panic("stable identity mapping conflict accepted");
+  fi
+  val different_table = schema.table_checked("different", "users", arr[
+    schema.column("id", "id", "uuid", false)
+  ]);
+  val different_table_value = different_table.unwrap();
+  if !schema.diff_checked(rt borrow current_table, rt borrow different_table_value).is_err() then
+    panic("different table identities accepted");
+  fi
+  // Constructors are public: diff must revalidate instead of trusting them.
+  val fabricated = new SchemaTable("users", "users", arr[
+    schema.column("id", "id", "arbitrary-sql", false)
+  ]);
+  if !schema.diff_checked(rt borrow fabricated, rt borrow current_table).is_err() then
+    panic("unvalidated direct-constructor schema admitted");
+  fi
+  stdio.println("Pure Oreslang schema-diff planning contracts passed");
+  return;
+}

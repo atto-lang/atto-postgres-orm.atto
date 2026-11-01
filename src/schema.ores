@@ -1,0 +1,195 @@
+// Runtime-neutral, pure Oreslang structural schema planner (v1).
+// No SQL, database connection, migration execution, or authority bypass.
+// Stable identities must be supplied by a reviewed catalog/DB mapping ledger.
+pub define class SchemaColumn as
+  pub val string stable_id;
+  pub val string name;
+  pub val string kind;
+  pub val bool nullable;
+  pub constructor(string stable_id, string name, string kind, bool nullable) {
+    self.stable_id = stable_id;
+    self.name = name;
+    self.kind = kind;
+    self.nullable = nullable;
+  }
+end
+
+pub define class SchemaTable as
+  pub val string stable_id;
+  pub val string name;
+  val Array<SchemaColumn> saved_columns;
+  pub constructor(string stable_id, string name, Array<SchemaColumn> columns) {
+    self.stable_id = stable_id;
+    self.name = name;
+    let mut Array<SchemaColumn> copy = arr[];
+    for (val column of columns) {
+      copy.add(column);
+    }
+    self.saved_columns = copy;
+  }
+  pub columns(): Array<SchemaColumn> {
+    let mut Array<SchemaColumn> copy = arr[];
+    for (val column of self.saved_columns) {
+      copy.add(column);
+    }
+    return copy;
+  }
+end
+
+// risk: safe, preflight, manual, destructive. These are planning labels,
+// NOT authorization to apply SQL. Every proposed step requires review.
+pub define class SchemaStep as
+  pub val string op;
+  pub val string table_id;
+  pub val string column_id;
+  pub val string risk;
+  pub constructor(string op, string table_id, string column_id, string risk) {
+    self.op = op;
+    self.table_id = table_id;
+    self.column_id = column_id;
+    self.risk = risk;
+  }
+end
+
+pub define class SchemaPlan as
+  val Array<SchemaStep> saved_steps;
+  pub constructor(Array<SchemaStep> steps) {
+    let mut Array<SchemaStep> copy = arr[];
+    for (val step of steps) { copy.add(step); }
+    self.saved_steps = copy;
+  }
+  pub step_count(): int { return self.saved_steps.size; }
+  pub step_at(int index): Result<SchemaStep, string> {
+    if index < 0 || index >= self.saved_steps.size then
+      return Err("schema step index out of bounds");
+    fi
+    return Ok(self.saved_steps.get(index));
+  }
+  pub has_blockers(): bool {
+    for (val step of self.saved_steps) {
+      if step.risk != "safe" then return true; fi
+    }
+    return false;
+  }
+end
+
+define module schema as
+  // Portable, explicit ASCII identifier policy independent of SQL dialect.
+  // The 63-byte limit makes v1 identities lossless for PostgreSQL, but the
+  // IR itself is not tied to a PostgreSQL connection or SQL renderer.
+  pub fnc admitted_name(string name): bool {
+    if !name.is_identifier() then return false; fi
+    if name.replace_literal("|", "") != name then return false; fi
+    let string mapped = name;
+    for (val letter of arr["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"]) {
+      mapped = mapped.replace_literal(letter, "|");
+    }
+    if mapped.replace_literal("|", "") != "" then return false; fi
+    return mapped.split_literal("|").size <= 64;
+  }
+
+  pub fnc admitted_kind(string kind): bool {
+    return kind == "uuid" || kind == "string" || kind == "int32"
+      || kind == "int64" || kind == "boolean" || kind == "json"
+      || kind == "timestamp" || kind == "bytes";
+  }
+
+  pub fnc column(string stable_id, string name, string kind, bool nullable): SchemaColumn {
+    return new SchemaColumn(stable_id, name, kind, nullable);
+  }
+
+  // Check all fields even on publicly constructed SchemaColumn instances.
+  // This is the pure structural admission boundary, not a SQL safety gate.
+  pub fnc table_checked(string stable_id, string name, Array<SchemaColumn> columns): Result<SchemaTable, string> {
+    if !admitted_name(stable_id) || !admitted_name(name) then
+      return Err("unadmitted schema table identity");
+    fi
+    if columns.size == 0 || columns.size > 64 then
+      return Err("schema table requires 1 to 64 columns");
+    fi
+    for (val column_def of columns) {
+      if !admitted_name(column_def.stable_id) || !admitted_name(column_def.name) then
+        return Err("unadmitted schema column identity");
+      fi
+      if !admitted_kind(column_def.kind) then
+        return Err("unadmitted schema column kind");
+      fi
+      let bool seen_id = false;
+      let bool seen_name = false;
+      for (val other of columns) {
+        if other.stable_id == column_def.stable_id then
+          if seen_id then return Err("duplicate schema column stable id"); fi
+          seen_id = true;
+        fi
+        if other.name == column_def.name then
+          if seen_name then return Err("duplicate schema column name"); fi
+          seen_name = true;
+        fi
+      }
+    }
+    return Ok(new SchemaTable(stable_id, name, columns));
+  }
+
+  // desired = independently reconciled declared catalog;
+  // actual = introspected DB catalog with reviewed stable-id assignments.
+  // Never infer a rename from coincidental names or silently produce SQL.
+  pub fnc diff_checked(borrow SchemaTable desired, borrow SchemaTable actual): Result<SchemaPlan, string> {
+    val desired_check = table_checked(desired.stable_id, desired.name, desired.columns());
+    val actual_check = table_checked(actual.stable_id, actual.name, actual.columns());
+    if desired_check.is_err() || actual_check.is_err() then
+      return Err("invalid schema table at diff trust boundary");
+    fi
+    if desired.stable_id != actual.stable_id then
+      return Err("schema table stable identity mismatch");
+    fi
+    let mut Array<SchemaStep> steps = arr[];
+    if desired.name != actual.name then
+      steps.add(new SchemaStep("review_table_rename", desired.stable_id, "", "manual"));
+    fi
+
+    val desired_columns = desired.columns();
+    val actual_columns = actual.columns();
+    for (val wanted of desired_columns) {
+      let bool matched = false;
+      for (val existing of actual_columns) {
+        if wanted.stable_id == existing.stable_id then
+          matched = true;
+          if wanted.name != existing.name then
+            steps.add(new SchemaStep("review_column_rename", desired.stable_id, wanted.stable_id, "manual"));
+          fi
+          if wanted.kind != existing.kind then
+            steps.add(new SchemaStep("review_type_change", desired.stable_id, wanted.stable_id, "manual"));
+          fi
+          if wanted.nullable != existing.nullable then
+            if wanted.nullable then
+              steps.add(new SchemaStep("drop_not_null", desired.stable_id, wanted.stable_id, "safe"));
+            else
+              steps.add(new SchemaStep("set_not_null", desired.stable_id, wanted.stable_id, "preflight"));
+            fi
+          fi
+        else
+          if wanted.name == existing.name then
+            return Err("schema column name mapped to a different stable identity");
+          fi
+        fi
+      }
+      if !matched then
+        if wanted.nullable then
+          steps.add(new SchemaStep("add_nullable_column", desired.stable_id, wanted.stable_id, "safe"));
+        else
+          steps.add(new SchemaStep("add_required_column", desired.stable_id, wanted.stable_id, "preflight"));
+        fi
+      fi
+    }
+    for (val existing of actual_columns) {
+      let bool found = false;
+      for (val wanted of desired_columns) {
+        if existing.stable_id == wanted.stable_id then found = true; fi
+      }
+      if !found then
+        steps.add(new SchemaStep("drop_column", desired.stable_id, existing.stable_id, "destructive"));
+      fi
+    }
+    return Ok(new SchemaPlan(steps));
+  }
+end
