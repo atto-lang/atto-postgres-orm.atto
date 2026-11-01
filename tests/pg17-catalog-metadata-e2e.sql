@@ -35,6 +35,18 @@ CREATE TEMP TABLE expected_default ON COMMIT DROP AS
   JOIN pg_catalog.pg_attribute a
     ON a.attrelid=d.adrelid AND a.attnum=d.adnum
   WHERE d.adrelid='guarded_records'::regclass AND a.attname='status';
+-- Compare definitions, not just object name and existence, to catch
+-- same-name constraint/index substitution.
+CREATE TEMP TABLE expected_constraint_defs ON COMMIT DROP AS
+  SELECT conname, pg_catalog.pg_get_constraintdef(oid) AS definition
+  FROM pg_catalog.pg_constraint
+  WHERE conrelid='guarded_records'::regclass AND contype IN ('p','c');
+CREATE TEMP TABLE expected_index_def ON COMMIT DROP AS
+  SELECT pg_catalog.pg_get_indexdef(i.indexrelid) AS definition
+  FROM pg_catalog.pg_index i
+  JOIN pg_catalog.pg_class idx ON idx.oid=i.indexrelid
+  WHERE i.indrelid='guarded_records'::regclass
+    AND idx.relname='guarded_status_unique';
 CREATE FUNCTION assert_protected_metadata() RETURNS void
 LANGUAGE plpgsql AS $assert$
 BEGIN
@@ -54,6 +66,24 @@ BEGIN
     JOIN pg_catalog.pg_class idx ON idx.oid=i.indexrelid
     WHERE i.indrelid='guarded_records'::regclass
       AND idx.relname='guarded_status_unique' AND i.indisunique AND i.indisvalid
+  ) OR (SELECT count(*) FROM pg_catalog.pg_index
+        WHERE indrelid='guarded_records'::regclass) <> 2
+     OR (SELECT count(*) FROM pg_catalog.pg_constraint
+        WHERE conrelid='guarded_records'::regclass AND contype IN ('p','c')) <> 2
+     OR EXISTS (
+    SELECT 1 FROM expected_constraint_defs base
+    WHERE NOT EXISTS (
+      SELECT 1 FROM pg_catalog.pg_constraint c
+      WHERE c.conrelid='guarded_records'::regclass AND c.conname=base.conname
+        AND pg_catalog.pg_get_constraintdef(c.oid)=base.definition
+    )
+  ) OR NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_index i
+    JOIN pg_catalog.pg_class idx ON idx.oid=i.indexrelid
+    CROSS JOIN expected_index_def base
+    WHERE i.indrelid='guarded_records'::regclass
+      AND idx.relname='guarded_status_unique'
+      AND pg_catalog.pg_get_indexdef(i.indexrelid)=base.definition
   ) OR (SELECT count(*) FROM pg_catalog.pg_policy
         WHERE polrelid='guarded_records'::regclass) <> 1
      OR NOT EXISTS (
@@ -151,6 +181,41 @@ BEGIN
     ALTER TABLE guarded_records ALTER COLUMN status SET DEFAULT 'closed';
     PERFORM assert_protected_metadata();
     RAISE EXCEPTION 'DEFAULT_CHANGE_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    DROP INDEX guarded_status_unique;
+    CREATE UNIQUE INDEX guarded_status_unique ON guarded_records(id);
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'INDEX_DEFINITION_SUBSTITUTION_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    ALTER TABLE guarded_records DROP CONSTRAINT status_allowed;
+    ALTER TABLE guarded_records ADD CONSTRAINT status_allowed CHECK (status <> '');
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'CHECK_DEFINITION_SUBSTITUTION_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    ALTER TABLE guarded_records DROP CONSTRAINT guarded_records_pkey;
+    ALTER TABLE guarded_records ADD CONSTRAINT guarded_records_pkey PRIMARY KEY(id);
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'PRIMARY_KEY_DEFINITION_SUBSTITUTION_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    CREATE UNIQUE INDEX additional_unique ON guarded_records(id);
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'ADDITIONAL_UNREVIEWED_INDEX_UNDETECTED';
   EXCEPTION WHEN check_violation THEN
     GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
     IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
