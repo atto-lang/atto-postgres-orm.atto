@@ -188,8 +188,10 @@ pub routine main(): void {
   // the public review envelope's permanent STOPPED/approved=false state.
   val drift_plan_r = schema.diff_catalog_checked(rt borrow next_cat, rt borrow current_cat);
   if drift_plan_r.is_err() then panic("repeated catalog diff rejected"); fi
-  val first_review = schema.review_manifest_preview_checked(rt borrow created.unwrap());
-  val repeat_review = schema.review_manifest_preview_checked(rt borrow drift_plan_r.unwrap());
+  val repeat_base = created.unwrap();
+  val repeat_candidate = drift_plan_r.unwrap();
+  val first_review = schema.review_manifest_preview_checked(rt borrow repeat_base);
+  val repeat_review = schema.review_manifest_preview_checked(rt borrow repeat_candidate);
   if first_review.is_err() || repeat_review.is_err() then
     panic("repeat review manifest rejected");
   fi
