@@ -451,9 +451,10 @@ expressions before applying a nullable-column addition. It requires that
 `pg_class`, `pg_policy`, `pg_constraint`, `pg_index`, and `pg_attrdef`
 continue to match the reviewed baseline after the addition.
 
-Seven mutation cases must fail with SQLSTATE 23514 **and the exact**
+Nine mutation cases must fail with SQLSTATE 23514 **and the exact**
 `PROTECTED_CATALOG_DRIFT` diagnostic: RLS disable, FORCE RLS removal,
-policy removal, policy weakening, unique-index drop, check-constraint
+policy removal, policy weakening, policy role-scope changes, injection of
+an additional permissive policy, unique-index drop, check-constraint
 drop, and column-default change. PL/pgSQL exception subtransactions
 roll back the hostile mutations, and the outer transaction always
 `ROLLBACK`s. The final query must show that the temporary schema
