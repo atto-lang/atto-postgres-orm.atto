@@ -11,7 +11,7 @@ esac
 [[ "${#EXPECTED_SOURCE_SHA}" -eq 40 ]] || die "source SHA is not 40 hex bytes"
 observed="$(git rev-parse --verify HEAD)" || die "source commit unavailable"
 [[ "$observed" == "$EXPECTED_SOURCE_SHA" ]] || die "source commit mismatch"
-[[ -z "$(git status --porcelain --untracked-files=normal -- tests/native-harness-extended.ores vendor/oreslang/testing.ores ci/native-harness-cases.txt)" ]] || die "dirty test inputs"
+[[ -z "$(git status --porcelain --untracked-files=normal)" ]] || die "dirty tracked source or untracked checkout files"
 for f in tests/native-harness-extended.ores vendor/oreslang/testing.ores ci/native-harness-cases.txt; do
   [[ -f "$f" && ! -L "$f" ]] || die "missing or symlink test artifact $f"
   git ls-files --error-unmatch -- "$f" >/dev/null || die "untracked test artifact $f"
@@ -37,6 +37,7 @@ grep -Fq '"guest_execution":' "$tmp/build-info" || die "compiler has no guest_ex
 "$limiter" -k 3s 30s "$ORESLANG_BIN" --check tests/native-harness-extended.ores >"$tmp/check.out" 2>"$tmp/check.err" || { cat "$tmp/check.err" >&2; die "Oreslang compiler check failed"; }
 "$limiter" -k 3s 45s "$ORESLANG_BIN" tests/native-harness-extended.ores >"$tmp/guest.stdout" 2>"$tmp/guest.stderr" || { cat "$tmp/guest.stderr" >&2; die "Oreslang guest execution failed"; }
 [[ "$(fingerprint)" == "$ORESLANG_COMPILER_SHA256" ]] || die "compiler changed during execution"
+[[ ! -s "$tmp/guest.stderr" ]] || die "unexpected guest stderr; review diagnostic output separately"
 [[ "$(wc -c <"$tmp/guest.stdout" | tr -d ' ')" -le 8192 ]] || die "guest stdout exceeded receipt limit"
 [[ "$(wc -l <"$tmp/guest.stdout" | tr -d ' ')" -eq 7 ]] || die "guest stdout must contain exactly six PASS lines and one SUMMARY"
 [[ "$(wc -l <ci/native-harness-cases.txt | tr -d ' ')" -eq 6 ]] || die "expected case count must be six"
@@ -48,4 +49,5 @@ LC_ALL=C sort ci/native-harness-cases.txt >"$tmp/expected"
 LC_ALL=C sort "$tmp/actual-cases" >"$tmp/actual"
 cmp -s "$tmp/expected" "$tmp/actual" || die "PASS case identities differ from reviewed manifest"
 [[ "$(grep -Fxc 'ORES_TEST|SUMMARY|total=6|passed=6|failed=0|skipped=0|filtered=0' "$tmp/guest.stdout")" -eq 1 ]] || die "wrong or duplicate guest summary"
+[[ "$(tail -n 1 "$tmp/guest.stdout")" == 'ORES_TEST|SUMMARY|total=6|passed=6|failed=0|skipped=0|filtered=0' ]] || die "SUMMARY must be the final guest event"
 printf 'ORES_NATIVE_GUEST_PASS source_sha=%s compiler_sha256=%s cases=6\n' "$observed" "$ORESLANG_COMPILER_SHA256"
