@@ -135,26 +135,26 @@ SQL
 [[ "$tenant_b_count" == "1" ]] || fail "tenant B row was modified or leaked: $tenant_b_count"
 
 # Exercise effective session privileges, rather than only a privileged login
-# performing SET ROLE.  A fresh superuser-owned test connection demotes its
+# performing SET ROLE. A fresh superuser-owned test connection demotes its
 # session authorization to the untrusted role; PostgreSQL must then deny
 # switching directly to the other tenant role.
-nonprivileged="$(psql -X -qAt -v ON_ERROR_STOP=1 \\
-  -v "contract_schema=$schema" -v "role_a=$role_a" \\
+nonprivileged="$(psql -X -qAt -v ON_ERROR_STOP=1 \
+  -v "contract_schema=$schema" -v "role_a=$role_a" \
   "$PG_TEST_DSN" <<'SQL'
 SET SESSION AUTHORIZATION :"role_a";
 SELECT current_user = session_user;
 SELECT count(*) FROM :"contract_schema".records;
 SQL
 )" || fail 'unprivileged tenant query failed'
-[[ "$nonprivileged" == "$(printf 't\\n2')" ]] ||
+[[ "$nonprivileged" == "$(printf 't\n2')" ]] ||
   fail "unprivileged tenant authorization/visibility mismatch: $nonprivileged"
 
 set +e
-switch_denied="$(printf '%s\\n' '\\set VERBOSITY verbose' \\
-  "SET SESSION AUTHORIZATION :\\"role_a\\";" \\
-  "SET ROLE :\\"role_b\\";" | \\
-  psql -X -qAt -v ON_ERROR_STOP=1 \\
-    -v "role_a=$role_a" -v "role_b=$role_b" \\
+switch_denied="$(printf '%s\n' '\set VERBOSITY verbose' \
+  "SET SESSION AUTHORIZATION :\"role_a\";" \
+  "SET ROLE :\"role_b\";" | \
+  psql -X -qAt -v ON_ERROR_STOP=1 \
+    -v "role_a=$role_a" -v "role_b=$role_b" \
     "$PG_TEST_DSN" 2>&1)"
 switch_status=$?
 set -e
