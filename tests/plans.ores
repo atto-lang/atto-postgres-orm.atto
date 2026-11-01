@@ -11,6 +11,8 @@ pub routine main(): void {
   if pg.ident("a\"b") != "\"a\"\"b\"" then panic("embedded quote not escaped"); fi
   if !pg.column("name", "uuid; SELECT 1", false).is_err() then panic("type-token injection"); fi
   if query.params.get(1) != "id" then panic("identifier value must remain bound"); fi
+  if !pg.column("unsafe", "integer CHECK (1=1)", false).is_err() then panic("type expression injection"); fi
+  if pg.column("nullable2", "text", true).unwrap() != "\"nullable2\" text" then panic("nullable text type"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
