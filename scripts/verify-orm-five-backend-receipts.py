@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import subprocess
 import sys
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -19,7 +20,8 @@ DIGEST = re.compile(r"^[0-9a-f]{64}$")
 BACKENDS = ("java", "llvm", "wasm", "cranelift", "net")
 EXPECTED_KEYS = {
     "format", "backend", "case", "orm_head", "compiler_head",
-    "source_sha256", "compiler_binary_sha256", "guest_artifact_sha256",
+    "source_sha256", "schema_source_sha256", "pg_source_sha256",
+    "compiler_binary_sha256", "guest_artifact_sha256",
     "runner_binary_sha256", "compiler_exit", "guest_exit",
     "guest_stdout", "guest_stderr", "skipped", "run_kind",
 }
@@ -90,8 +92,20 @@ def load_manifest():
 def verify_receipts(manifest, directory, orm_head):
     require(HEAD.fullmatch(orm_head) is not None,
             "ORM HEAD must be exact 40-character lowercase Git SHA")
+    try:
+        actual_head = subprocess.check_output(
+            ["git", "-C", str(ROOT), "rev-parse", "HEAD"],
+            stderr=subprocess.DEVNULL, text=True).strip()
+        modified = subprocess.check_output(
+            ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
+            stderr=subprocess.DEVNULL, text=True).strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("cannot attest local ORM Git checkout") from error
+    require(actual_head == orm_head and modified == "",
+            "ORM checkout head mismatch or tracked files modified")
     require(directory.is_dir() and not directory.is_symlink(),
             "receipt directory must be a real local directory")
+    consistent = {}
     required_names = {
         backend + "--" + case["id"] + ".json"
         for backend in BACKENDS for case in manifest["cases"]
@@ -115,6 +129,9 @@ def verify_receipts(manifest, directory, orm_head):
                     "stale or malformed source/compiler head")
             require(item["source_sha256"] == digest(ROOT / case["source"]),
                     "receipt is not bound to this exact Oreslang fixture")
+            require(item["schema_source_sha256"] == digest(ROOT / "src/schema.ores")
+                    and item["pg_source_sha256"] == digest(ROOT / "src/pg.ores"),
+                    "receipt ORM source module hash mismatch")
             for key in ("compiler_binary_sha256", "guest_artifact_sha256",
                         "runner_binary_sha256"):
                 require(isinstance(item[key], str)
@@ -129,6 +146,13 @@ def verify_receipts(manifest, directory, orm_head):
             require(item["guest_stdout"] == case["expected_stdout"]
                     and item["guest_stderr"] == "",
                     "guest output/diagnostic mismatch")
+            lineage = (item["compiler_head"], item["compiler_binary_sha256"],
+                       item["runner_binary_sha256"])
+            if backend in consistent:
+                require(consistent[backend] == lineage,
+                        "one backend changed compiler or runner within fixture batch")
+            else:
+                consistent[backend] = lineage
     return len(required_names)
 
 
