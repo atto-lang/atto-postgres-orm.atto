@@ -436,6 +436,92 @@ pub routine main(): void {
     panic("committed connection release rejected");
   fi
 
+
+  // Adversarial actor-owned lease transition matrix. These tests use pure
+  // Oreslang state contracts; they do NOT simulate a PostgreSQL wire driver.
+  if !pg.acquire_connection_checked("", "actor-A", 1, 1, "tenant_a").is_err() then
+    panic("empty physical connection identifier admitted");
+  fi
+  if !pg.acquire_connection_checked("schema.conn", "actor-A", 1, 1, "tenant_a").is_err() then
+    panic("qualified connection identifier admitted");
+  fi
+  if !pg.acquire_connection_checked("conn_1", "actor\nB", 1, 1, "tenant_a").is_err() then
+    panic("control-bearing actor identity admitted");
+  fi
+  if !pg.acquire_connection_checked("conn_1", "actor-A", 0, 1, "tenant_a").is_err() then
+    panic("zero actor generation admitted");
+  fi
+  if !pg.acquire_connection_checked("conn_1", "actor-A", 1, 0, "tenant_a").is_err() then
+    panic("zero pool lease generation admitted");
+  fi
+  if !pg.acquire_connection_checked("conn_1", "actor-A", 1, 1, "tenant.role").is_err() then
+    panic("qualified tenant role admitted");
+  fi
+  val forged_unknown = new DbConnectionState("conn_1", "actor-A", 3, 7, "tenant_a", "unknown");
+  if pg.admitted_connection_state(rt borrow forged_unknown) then
+    panic("unknown connection phase admitted");
+  fi
+  if pg.same_connection_authority(rt borrow forged_unknown, "actor-A", 3, 7) then
+    panic("forged phase grants connection authority");
+  fi
+  if !pg.begin_transaction_checked(rt borrow released_state, "actor-A", 3, 7).is_err() then
+    panic("released connection reopened without lease reassignment");
+  fi
+  if !pg.begin_transaction_checked(rt borrow rollback_required, "actor-A", 3, 7).is_err() then
+    panic("transaction restarted before rollback acknowledgement");
+  fi
+  if !pg.acknowledge_abort_rollback_checked(rt borrow active_state, "actor-A", 3, 7).is_err() then
+    panic("ROLLBACK acknowledged without rollback-required phase");
+  fi
+  if !pg.acknowledge_abort_rollback_checked(rt borrow rolled_back_state, "actor-A", 3, 7).is_err() then
+    panic("duplicate ROLLBACK acknowledgement admitted");
+  fi
+  if !pg.mark_actor_abort_checked(rt borrow acquired_state, "actor-A", 3, 7).is_err() then
+    panic("actor abort on idle lease admitted as active rollback");
+  fi
+  if !pg.mark_actor_abort_checked(rt borrow committed_state, "actor-C", 9, 20).is_err() then
+    panic("committed transaction was allowed to enter rollback-required state");
+  fi
+  if !pg.acknowledge_commit_checked(rt borrow rollback_required, "actor-A", 3, 7).is_err() then
+    panic("COMMIT acknowledged after actor abort");
+  fi
+  if !pg.acknowledge_commit_checked(rt borrow committed_state, "actor-C", 9, 20).is_err() then
+    panic("duplicate COMMIT acknowledgement admitted");
+  fi
+  if !pg.acknowledge_commit_checked(rt borrow commit_active, "actor-D", 9, 20).is_err() then
+    panic("foreign actor acknowledged COMMIT");
+  fi
+  if !pg.acknowledge_commit_checked(rt borrow commit_active, "actor-C", 8, 20).is_err() then
+    panic("stale actor generation acknowledged COMMIT");
+  fi
+  if !pg.acknowledge_commit_checked(rt borrow commit_active, "actor-C", 9, 19).is_err() then
+    panic("stale connection generation acknowledged COMMIT");
+  fi
+  if !pg.release_connection_checked(rt borrow released_state, "actor-A", 3, 7).is_err() then
+    panic("already released connection released a second time");
+  fi
+  if !pg.reassign_released_connection_checked(rt borrow active_state, "actor-B", 4, 8, "tenant_b").is_err() then
+    panic("active connection assigned to a second actor");
+  fi
+  if !pg.reassign_released_connection_checked(rt borrow released_state, "actor-B", 0, 8, "tenant_b").is_err() then
+    panic("reassigned actor with invalid generation");
+  fi
+  if !pg.reassign_released_connection_checked(rt borrow released_state, "actor-B", 4, 8, "tenant.b").is_err() then
+    panic("unadmitted tenant role reused on pool reassignment");
+  fi
+  if !pg.reassign_released_connection_checked(rt borrow released_state, "actor-B", 4, 6, "tenant_b").is_err() then
+    panic("decreasing pool lease generation admitted");
+  fi
+  if pg.same_lease_identity(rt borrow released_state, rt borrow reassigned_state) then
+    panic("reassigned connection spoofed original identity");
+  fi
+  if !pg.same_lease_identity(rt borrow acquired_state, rt borrow active_state) then
+    panic("phase transition changed the actual lease identity");
+  fi
+  if pg.same_lease_identity(rt borrow forged_unknown, rt borrow active_state) then
+    panic("forged unknown phase matched an active lease identity");
+  fi
+
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
