@@ -4,6 +4,10 @@ const SOURCE: &str = include_str!("../src/schema.ores");
 const GUEST: &str = include_str!("schema-invariants.ores");
 const VERIFIER: &str = include_str!("../scripts/verify-native-plans");
 const POLICY: &str = include_str!("../docs/MIGRATION_BACKEND_PARITY.md");
+const COMBINED: &str = include_str!("orm-cross-backend.ores");
+const FIVE_BACKEND: &str = include_str!("../contracts/orm-five-backend-gate.v1.json");
+const RECEIPT_GUARD: &str = include_str!("../scripts/verify-orm-five-backend-receipts.py");
+
 
 fn section<'a>(source: &'a str, start: &str, end: &str) -> &'a str {
     source
@@ -162,4 +166,37 @@ fn python_host_suites_are_not_mislabeled_as_rust_parity() {
     assert!(POLICY.contains("coverage-preserving Rust replacement"));
     assert!(POLICY.contains("do not count the new"));
     assert!(POLICY.contains("Python"));
+}
+
+#[test]
+fn five_backend_manifest_never_claims_source_or_guest_parity() {
+    for backend in ["java", "llvm", "wasm", "cranelift", "net"] {
+        assert!(FIVE_BACKEND.contains(&format!("\"{backend}\"")),
+                "missing backend {backend}");
+    }
+    for source in ["tests/plans.ores", "tests/schema-plans.ores",
+                   "tests/schema-adversarial.ores", "tests/schema-invariants.ores",
+                   "tests/orm-cross-backend.ores"] {
+        assert!(FIVE_BACKEND.contains(source), "missing native fixture: {source}");
+    }
+    assert!(FIVE_BACKEND.contains("\"status\": \"NOT_VERIFIED\""));
+    assert!(RECEIPT_GUARD.contains("5 toolchains x 5 suites = 25"));
+    assert!(RECEIPT_GUARD.contains("orm_head"));
+    assert!(RECEIPT_GUARD.contains("schema_source_sha256"));
+    assert!(RECEIPT_GUARD.contains("pg_source_sha256"));
+    assert!(RECEIPT_GUARD.contains("one backend changed compiler or runner"));
+    assert!(RECEIPT_GUARD.contains("RECEIPT_SHAPES_ACCEPTED_PENDING_INDEPENDENT_NATIVE_REVIEW"));
+}
+
+#[test]
+fn one_guest_imports_both_orm_modules_and_checks_separate_authority() {
+    assert!(COMBINED.contains("import module pg from '../src/pg';"));
+    assert!(COMBINED.contains("import module schema from '../src/schema';"));
+    assert!(COMBINED.contains("schema.table_checked("));
+    assert!(COMBINED.contains("pg.table_typed_pk("));
+    assert!(COMBINED.contains("arbitrary-sql"));
+    assert!(COMBINED.contains("docs;DROP"));
+    assert!(COMBINED.contains("combined ORM portability contracts passed"));
+    assert!(VERIFIER.contains("run_guest combined-orm tests/orm-cross-backend.ores combined-positive"));
+    assert!(VERIFIER.contains("-eq 9"));
 }
