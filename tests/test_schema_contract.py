@@ -6,6 +6,10 @@ these tests deliberately do not claim to replace it.
 import copy
 import json
 import pathlib
+import os
+import shutil
+import subprocess
+import tempfile
 import unittest
 
 from jsonschema import Draft202012Validator, ValidationError
@@ -552,6 +556,97 @@ class CatalogContractTests(unittest.TestCase):
             "stale baseline equal to desired bypassed drift gate",
         ):
             self.assertIn(marker, fixture)
+
+
+    def test_pg17_e2e_script_bash_syntax(self):
+        """Actual host Bash parser; not PostgreSQL execution."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash missing")
+        for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+            with self.subTest(name=name):
+                proc = subprocess.run(
+                    [shell, "-n", str(ROOT / "tests" / name)],
+                    capture_output=True, text=True, check=False,
+                )
+                self.assertEqual(proc.returncode, 0, proc.stderr)
+
+    def test_pg17_e2e_rejects_missing_disposable_opt_in_without_db_contact(self):
+        """Verify guard rejects before invoking psql, with an isolated fake PATH."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            marker = pathlib.Path(tmp) / "psql-called"
+            fake = pathlib.Path(tmp) / "psql"
+            fake.write_text(
+                '#!/bin/sh\nprintf "CALLED\\n" >> "$PG_MOCK_CONTACT"\n'
+                'printf "170001\\n"\n', encoding="utf-8")
+            fake.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = tmp + os.pathsep + env.get("PATH", "")
+            env["PG_MOCK_CONTACT"] = str(marker)
+            env["PG_TEST_DSN"] = "postgresql://dummy@invalid/test"
+            env.pop("PG_TEST_DISPOSABLE", None)
+            for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+                with self.subTest(script=name):
+                    proc = subprocess.run(
+                        [shell, str(ROOT / "tests" / name)],
+                        capture_output=True, text=True, env=env, check=False,
+                    )
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertIn("NOT_VERIFIED:", proc.stderr)
+                    self.assertFalse(marker.exists(), "unauthorized DB contact")
+
+    def test_pg17_e2e_refuses_wrong_server_versions(self):
+        """Fake psql version only. Never claim a PostgreSQL E2E pass."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash missing")
+        with tempfile.TemporaryDirectory() as tmp:
+            fake = pathlib.Path(tmp) / "psql"
+            fake.write_text('#!/bin/sh\nprintf "%s\\n" "$PG_MOCK_VERSION"\n',
+                            encoding="utf-8")
+            fake.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = tmp + os.pathsep + env.get("PATH", "")
+            env["PG_TEST_DISPOSABLE"] = "I_ACKNOWLEDGE_DISPOSABLE_DATABASE"
+            env["PG_TEST_DSN"] = "postgresql://dummy@invalid/test"
+            for version in ("160017", "180001", "seventeen", "1700"):
+                env["PG_MOCK_VERSION"] = version
+                for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+                    with self.subTest(version=version, script=name):
+                        proc = subprocess.run(
+                            [shell, str(ROOT / "tests" / name)], capture_output=True,
+                            text=True, env=env, check=False,
+                        )
+                        self.assertNotEqual(proc.returncode, 0)
+                        self.assertIn("PostgreSQL 17", proc.stderr)
+
+    def test_pg17_e2e_sql_scope_and_ci_registration(self):
+        """Host-only source inventory, NOT actual live catalog verification."""
+        sql = (ROOT / "tests/pg17-catalog-readback-e2e.sql").read_text(encoding="utf-8")
+        catalog = (ROOT / "tests/pg17-catalog-readback-e2e.bash").read_text(encoding="utf-8")
+        lock = (ROOT / "tests/pg17-migration-lock-e2e.bash").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github/workflows/pg17-ddl-integration.yml").read_text(
+            encoding="utf-8")
+        for marker in (
+            "pg_catalog.pg_attribute", "CREATE SCHEMA",
+            "ALTER TABLE accounts ADD COLUMN notes text", "CATALOG_SHAPE_DRIFT",
+            "TYPE_DRIFT_NOT_CAUGHT", "RENAME_DRIFT_NOT_CAUGHT",
+            "EXTRA_COLUMN_NOT_CAUGHT", "ROLLBACK;",
+            "SELECT count(*) FROM pg_catalog.pg_namespace",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, sql)
+        self.assertIn("PG_TEST_DISPOSABLE", catalog)
+        self.assertIn("PG_TEST_DSN", catalog)
+        self.assertIn("pg_advisory_xact_lock", lock)
+        self.assertIn("pg_try_advisory_xact_lock", lock)
+        self.assertIn("transaction advisory lock not released", lock)
+        for script in ("tests/pg17-catalog-readback-e2e.bash",
+                       "tests/pg17-migration-lock-e2e.bash"):
+            self.assertIn(script, workflow)
 
 if __name__ == "__main__":
     unittest.main()
