@@ -345,3 +345,44 @@ claim live PostgreSQL proof from fake-pg mocks. These tests do not certify
 TypeSpec/JSON Schema semantic parity, a stable-ID ledger, unmodeled database
 objects, actual DPM migration artifacts, a native Oreslang driver, actor
 leases, or backend parity.
+
+
+## 2026-11-01 migration history/checksum replay E2E (SQL-only, unexecuted)
+
+New `tests/pg17-migration-history-e2e.sql` and the guarded
+`tests/pg17-migration-history-e2e.bash` extend the isolated PostgreSQL 17
+service workflow. The SQL reference ledger records sequential migration
+version numbers and 64-character lowercase hexadecimal digests.
+It verifies that replay of the *same* digest does not create another
+ledger row, while changed digests, skipped versions, zero/NULL versions,
+NULL/noncanonical digests and uppercase digest strings are **rejected with
+specific SQLSTATE 23514 diagnostics**. The fixture explicitly rolls back
+every table/function it creates and demands a zero-surviving-schema receipt.
+
+The catalog E2E fixture was also hardened: all five drift provocations
+(type change, physical rename, new column, nullability relaxation and
+column drop) require the exact `CATALOG_SHAPE_DRIFT` diagnostic. An
+unrelated `check_violation` can no longer be silently counted as a pass.
+These cases check only v1 physical column shape, not full SQL/database
+catalog authority or real DPM migration-file digests.
+
+**Actually executed local host evidence:** the exact migration-history Bash
+wrapper blob `923705451240a8c5233eb483948e6c6bade0ddcd`
+and SQL blob `d36b309acc5290e5d263f123df14e774d7341b68`
+were reproduced byte-for-byte and verified with `git hash-object`.
+The wrapper passed `bash -n`, and **21/21 fake-psql host-mock cases
+passed**, covering no opt-in, missing/empty DSN, PostgreSQL 16/18 and
+malformed versions, failed server probe, incomplete or forged receipts,
+failed SQL subprocess and one expected mock success. They prove only
+shell control flow. `tests/test_schema_contract.py` additionally authors
+three Python subprocess methods to exercise these mock gates in CI
+(total **48 host test methods**, not executed as a full suite).
+
+**Actual PostgreSQL 17 ledger/collision/rollback SQL execution is
+NOT VERIFIED.** PostgreSQL server binaries were unavailable locally;
+source GitHub Actions job runs failed before runner allocation. These tests
+do not establish native Oreslang execution, TypeSpec/JSON Schema parity,
+PostgreSQL driver correctness, actor/tenant ownership, or full-catalog
+migration authorization. The migration ledger is an isolated SQL reference,
+not a production migration tool, a real file hash attestation or a green
+release gate.
