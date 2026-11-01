@@ -146,6 +146,28 @@ class IntegratedReviewAdmissionTests(unittest.TestCase):
             with self.subTest(field=field, bad=bad):
                 self.assert_rejected(obj, "catalog")
 
+    def test_terminal_line_breaks_denied_in_all_stable_id_fields(self):
+        for ending in ("\n", "\r", "\u2028", "\u2029"):
+            for field in ("stable_id", "name"):
+                obj = catalog()
+                obj["tables"][0][field] = "valid" + ending
+                with self.subTest(kind="table", field=field, ending=repr(ending)):
+                    self.assert_rejected(obj, "catalog")
+                obj = catalog()
+                obj["tables"][0]["columns"][0][field] = "valid" + ending
+                with self.subTest(kind="column", field=field, ending=repr(ending)):
+                    self.assert_rejected(obj, "catalog")
+            for field, operation in (("table_id", "review_drop_table"),
+                                     ("column_id", "drop_column")):
+                obj = review([step(operation)])
+                obj["steps"][0][field] = "valid" + ending
+                with self.subTest(kind="review", field=field, ending=repr(ending)):
+                    self.assert_rejected(obj, "review")
+            obj = review([step("review_drop_table")])
+            obj["steps"][0]["column_id"] = ending
+            with self.subTest(kind="empty-column-id", ending=repr(ending)):
+                self.assert_rejected(obj, "review")
+
     def test_unknown_fields_and_version_refused(self):
         for kind, original in (("catalog", catalog()), ("review", review())):
             obj = copy.deepcopy(original)
