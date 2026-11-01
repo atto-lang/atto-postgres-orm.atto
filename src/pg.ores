@@ -182,7 +182,7 @@ define module pg as
   // Borrowed variants preserve caller ownership while taking an independent
   // data snapshot. Use these when the caller must keep using its Array.
   pub fnc constraint_unique_borrowed(borrow Array<string> columns): ConstraintSpec {
-    let Array<string> copy = arr[];
+    let mut Array<string> copy = arr[];
     for (let int index = 0; index < columns.size; index++) {
       copy.add(columns.get(index));
     }
@@ -196,11 +196,11 @@ define module pg as
     string reference_table,
     borrow Array<string> reference_columns
   ): ConstraintSpec {
-    let Array<string> local_copy = arr[];
+    let mut Array<string> local_copy = arr[];
     for (let int local_index = 0; local_index < columns.size; local_index++) {
       local_copy.add(columns.get(local_index));
     }
-    let Array<string> reference_copy = arr[];
+    let mut Array<string> reference_copy = arr[];
     for (let int reference_index = 0; reference_index < reference_columns.size; reference_index++) {
       reference_copy.add(reference_columns.get(reference_index));
     }
@@ -373,7 +373,7 @@ define module pg as
   pub fnc snapshot_query_params_borrowed(
     string sql, borrow Array<string> params
   ): QueryPlan {
-    let Array<string> copy = arr[];
+    let mut Array<string> copy = arr[];
     for (let int index = 0; index < params.size; index++) {
       copy.add(params.get(index));
     }
@@ -437,7 +437,7 @@ define module pg as
       return Err("unadmitted PostgreSQL query table identifier");
     fi
     if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
-    let Array<DbValue> copy = arr[];
+    let mut Array<DbValue> copy = arr[];
     for (let int index = 0; index < values.size; index++) {
       val value = values.get(index);
       if !admitted_db_value(value) then
