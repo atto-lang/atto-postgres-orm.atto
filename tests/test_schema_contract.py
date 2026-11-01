@@ -563,7 +563,8 @@ class CatalogContractTests(unittest.TestCase):
         shell = shutil.which("bash")
         if shell is None:
             self.skipTest("bash missing")
-        for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+        for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash",
+                     "pg17-migration-lock-abort-e2e.bash"):
             with self.subTest(name=name):
                 proc = subprocess.run(
                     [shell, "-n", str(ROOT / "tests" / name)],
@@ -588,7 +589,8 @@ class CatalogContractTests(unittest.TestCase):
             env["PG_MOCK_CONTACT"] = str(marker)
             env["PG_TEST_DSN"] = "postgresql://dummy@invalid/test"
             env.pop("PG_TEST_DISPOSABLE", None)
-            for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+            for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash",
+                     "pg17-migration-lock-abort-e2e.bash"):
                 with self.subTest(script=name):
                     proc = subprocess.run(
                         [shell, str(ROOT / "tests" / name)],
@@ -614,7 +616,8 @@ class CatalogContractTests(unittest.TestCase):
             env["PG_TEST_DSN"] = "postgresql://dummy@invalid/test"
             for version in ("160017", "180001", "seventeen", "1700"):
                 env["PG_MOCK_VERSION"] = version
-                for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash"):
+                for name in ("pg17-catalog-readback-e2e.bash", "pg17-migration-lock-e2e.bash",
+                     "pg17-migration-lock-abort-e2e.bash"):
                     with self.subTest(version=version, script=name):
                         proc = subprocess.run(
                             [shell, str(ROOT / "tests" / name)], capture_output=True,
@@ -644,8 +647,13 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn("pg_advisory_xact_lock", lock)
         self.assertIn("pg_try_advisory_xact_lock", lock)
         self.assertIn("transaction advisory lock not released", lock)
+        aborted = (ROOT / "tests/pg17-migration-lock-abort-e2e.bash").read_text(
+            encoding="utf-8")
+        self.assertIn("ROLLBACK;", aborted)
+        self.assertIn("transaction advisory lock not released on ROLLBACK", aborted)
         for script in ("tests/pg17-catalog-readback-e2e.bash",
-                       "tests/pg17-migration-lock-e2e.bash"):
+                       "tests/pg17-migration-lock-e2e.bash",
+                       "tests/pg17-migration-lock-abort-e2e.bash"):
             self.assertIn(script, workflow)
 
     def test_catalog_nested_unknown_fields_and_missing_keys(self):
@@ -987,6 +995,95 @@ class CatalogContractTests(unittest.TestCase):
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("PG_HISTORY_E2E_NOT_VERIFIED:", proc.stderr)
 
+
+
+    def test_pg17_lock_host_fault_injection_commit_and_rollback(self):
+        """Run fake two-process lock failures, never a real PG17 server."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            home = pathlib.Path(tmp)
+            fake = home / "psql"
+            fake.write_text("""#!/usr/bin/env bash
+set -euo pipefail
+if [[ "$*" == *'SHOW server_version_num'* ]]; then
+  echo 170005
+  exit 0
+fi
+query="$(cat)"
+if [[ "$query" == *'SELECT pg_advisory_xact_lock('* ]]; then
+  touch "$MOCK_LOCK_STARTED" "$MOCK_LOCK_FILE"
+  sleep 0.25
+  rm -f "$MOCK_LOCK_FILE"
+  exit "\${MOCK_HOLDER_EXIT:-0}"
+fi
+if [[ "$query" == *'SELECT pg_try_advisory_xact_lock('* ]]; then
+  if [[ "\${MOCK_BAD_TRY:-}" == yes ]]; then echo invalid; exit 0; fi
+  if [[ "\${MOCK_STUCK_LOCK:-}" == yes || -f "$MOCK_LOCK_FILE" ]]; then
+    echo f
+  else
+    echo t
+  fi
+  exit 0
+fi
+echo UNEXPECTED_FAKE_SQL >&2
+exit 99
+""", encoding="utf-8")
+            fake.chmod(0o755)
+            env_base = os.environ.copy()
+            env_base["PATH"] = str(home) + os.pathsep + env_base.get("PATH", "")
+            env_base["PG_TEST_DSN"] = "postgresql://fake/db"
+            env_base["PG_TEST_DISPOSABLE"] = "I_ACKNOWLEDGE_DISPOSABLE_DATABASE"
+            env_base["MOCK_LOCK_FILE"] = str(home / "active-lock")
+            env_base["MOCK_LOCK_STARTED"] = str(home / "lock-started")
+            scripts = ("pg17-migration-lock-e2e.bash",
+                       "pg17-migration-lock-abort-e2e.bash")
+            cases = (
+                ("commit-or-rollback-release", {}, True),
+                ("holder-failure", {"MOCK_HOLDER_EXIT": "41"}, False),
+                ("unrecognized-try-lock-result", {"MOCK_BAD_TRY": "yes"}, False),
+                ("lock-not-released", {"MOCK_STUCK_LOCK": "yes"}, False),
+            )
+            for script in scripts:
+                for label, overrides, accepted in cases:
+                    with self.subTest(script=script, case=label):
+                        for marker in ("active-lock", "lock-started"):
+                            (home / marker).unlink(missing_ok=True)
+                        env = env_base.copy()
+                        env.update(overrides)
+                        proc = subprocess.run(
+                            [shell, str(ROOT / "tests" / script)],
+                            env=env, capture_output=True, text=True,
+                            check=False, timeout=20,
+                        )
+                        self.assertEqual(proc.returncode == 0, accepted,
+                                         proc.stderr)
+                        self.assertTrue((home / "lock-started").exists(),
+                                        "mock holder never started")
+                        if accepted:
+                            self.assertIn("_SQL_ONLY_PASS", proc.stdout)
+                        else:
+                            self.assertIn("PG_LOCK_E2E_NOT_VERIFIED:", proc.stderr)
+
+    def test_pg17_history_savepoint_recovery_contract_is_authored(self):
+        """Source-level coverage only; cannot certify SQL execution."""
+        source = (ROOT / "tests/pg17-migration-history-e2e.sql").read_text(
+            encoding="utf-8")
+        for marker in (
+            "SAVEPOINT aborted_migration;",
+            "ROLLBACK TO SAVEPOINT aborted_migration;",
+            "RELEASE SAVEPOINT aborted_migration;",
+            "TRANSIENT_APPLY_NOT_NEW",
+            "TRANSIENT_REPLAY_NOT_STABLE",
+            "ABORTED_LEDGER_ROW_SURVIVED",
+            "ABORTED_LEDGER_VERSION_SURVIVED",
+            "RECOVERY_PROBE_LEFT_LEDGER_ROW",
+            "UNDO_RECOVERY_PROBE",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, source)
+        self.assertEqual(source.count("\nROLLBACK;\n"), 1)
 
 if __name__ == "__main__":
     unittest.main()
