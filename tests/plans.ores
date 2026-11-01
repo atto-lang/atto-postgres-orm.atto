@@ -86,6 +86,15 @@ pub routine main(): void {
   if pg.admitted_identifier("runs\"; --") then panic("quote identifier admitted"); fi
   if pg.admitted_identifier("schema.runs") then panic("qualified identifier admitted"); fi
   if pg.admitted_identifier("é") then panic("unicode identifier admitted"); fi
+  if pg.admitted_identifier("nameé") then panic("unicode suffix admitted"); fi
+  if pg.admitted_identifier("Ωname") then panic("unicode prefix admitted"); fi
+  if pg.admitted_identifier("name|other") then panic("separator confusion admitted"); fi
+  if !pg.table_typed_pk("docsé", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_err() then panic("Unicode typed table identifier admitted"); fi
+  if !pg.find_in_workspace_plan_checked("runsé", "tenant-a", "record-1").is_err() then
+    panic("Unicode query table identifier admitted");
+  fi
   // Non-ASCII identifiers must fail even if a backend's is_identifier accepts
   // Unicode letters, marks, joiners or width-variant confusables.
   for (val non_ascii of arr["é", "élan", "aé", "éa", "a\u0301", "\uFF41", "a\u200d", "a\u00a0", "a\u03bf"]) {

@@ -1,6 +1,6 @@
 # PostgreSQL planner: executable acceptance gates
 
-Status: **NOT EXECUTED at this pull-request head**. This is a guest test plan and
+Status: **NATIVE ORESLANG GUEST NOT EXECUTED at this pull-request head**. This is a guest test plan and
 expected-oracle inventory, not a substitute for a native Oreslang compiler run.
 The ORM planner does not execute SQL, authenticate tenants or own a DB socket.
 
@@ -77,12 +77,13 @@ bash tests/verify-launcher-host.bash
 The launcher requires an explicitly selected Java 25 runtime when
 `ORES_JAVA` is provided and rejects mismatched compiler SHA, dirty or
 untracked/ignored compiler build inputs, missing classpath and missing
-`OresMain.class`. Eight standalone host-only mock scenarios are
-authoritatively identified by Git blobs
-`f6f6319e671f7caa09d927156fe389a2c22b5ce5` (launcher) and
-`106ac7192dd765b7d46f66206662ec89c69979b4` (test).
-Both files were reproduced exactly and passed `bash -n` locally;
-**8/8 mock launch scenarios executed and passed**. No private compiler
+`OresMain.class`. Eleven standalone host-only mock scenarios are
+identified by current Git blobs
+`fc88f48a612f32954c3919100476f424f7f74cab` (launcher) and
+`d89f6ef3d278b85a54086fe797b118347561069e` (test).
+Both files were reconstructed exactly, verified by `git hash-object`,
+passed `bash -n`, and **11/11 scenarios executed and passed**,
+including stale alternate classpath and symlinked classpath/class rejection. No private compiler
 or genuine Oreslang guest was executed in those tests.
 
 ### Alternate-org admission screening
@@ -107,11 +108,43 @@ its scenario count remains ten.
 
 A source-level cross-file audit confirmed **14/14 control catalog,
 fixture, verifier, and mock-harness invariants**, with all 33 distinct
-control values in both independent catalogs. The **newly modified host
-suite and native guest have not been executed** at this head. The earlier
-10/10 host mock PASS cited above pertains to preceding verifier/mock
-blobs, not this revision. The isolated JDK25 compiler and PostgreSQL
+control values in both independent catalogs. The expanded four-guest **host-only** suite has now executed and passed
+at the current scripts' exact Git blobs (see the updated host receipt below).
+The native Oreslang guest has **not** executed. Earlier mock results
+remain historical evidence for older verifier/mock blobs. The isolated JDK25 compiler and PostgreSQL
 integration remain unexecuted.
+
+## 2026-10-31 current-head executable host gate (NOT native)
+
+The verifier now enforces exact guest-case order
+(`positive`, `empty-identifier`, `empty-table`, `control-identifier`)
+and requires exactly four `PASS` rows, plus a TSV header, before it may
+write a `VERIFIED:` receipt. This is an independent check in addition
+to calling each guest. The host harness checks the existence of those
+fail-closed manifest gates.
+
+**Executed against byte-identical script files (Linux, Bash + Git):**
+`bash -n` passed all four scripts; the verifier mock suite
+**10/10 PASS** and *historical* launcher mock suite **8/8 PASS**.
+The current launcher suite expanded to **11/11 PASS**; see the current
+Git blobs listed above.
+
+- `scripts/verify-native-plans` Git blob:
+  `8e356f83ba8acf445ca296c99d5c5bbd58a3af97`
+- `tests/verify-native-plans-host.bash` Git blob:
+  `bec97bcfd19e912b017c36bb1c37c27d8b7301df`
+- `scripts/ores` Git blob:
+  `f6f6319e671f7caa09d927156fe389a2c22b5ce5`
+- `tests/verify-launcher-host.bash` Git blob:
+  `106ac7192dd765b7d46f66206662ec89c69979b4`
+
+The host mock suite deliberately uses fake compiler and guest worktrees
+and locally verified **source excerpts**, not full byte-identical
+`src/pg.ores` or `tests/plans.ores` files. It proves the verifier's
+mocked control flow and guard presence, **not** the real Oreslang
+compiler, an actual PostgreSQL database, tenant isolation, or backend
+parity. The updated tests are not a successful source-org Actions run;
+CI admission still fails with zero executed steps.
 
 ## One-command native execution gate
 
@@ -208,6 +241,41 @@ positive nor negative planner tests prove SQL execution or tenant isolation.
 Keep Rust receipt-inspector host tests and Oreslang guest/backend test evidence
 as **separate** classes. A syntactically consistent TSV receipt cannot certify
 that the GitHub job or compiler actually executed.
+
+## SQL-only PostgreSQL 17 executable constraint gate
+
+An independent integration workflow `.github/workflows/pg17-ddl-integration.yml`
+provisions PostgreSQL 17 and invokes `tests/pg17-ddl-contract.bash` with
+an explicit disposable-database opt-in. This test renders **no** native guest
+source: it checks that the authored Oreslang golden remains unchanged, executes
+the corresponding SQL on an ephemeral PostgreSQL schema, verifies UNIQUE,
+FOREIGN KEY, NOT NULL and composite PRIMARY KEY behavior, rolls back and
+confirms the schema did not persist.
+
+The SQL gate now requires a successful `SHOW server_version_num` response
+identifying the **PostgreSQL 17 server**, not merely a PostgreSQL 17 client.
+It also checks `current_setting('server_version_num')` inside the same SQL
+transaction as the DDL, so the preflight connection alone cannot certify
+a separately routed PostgreSQL backend.
+The separate host-only mock `bash tests/verify-pg17-ddl-host.bash` passed
+**10/10** locally (missing opt-in, missing DSN, source golden drift before
+any database contact, normal fake psql, unexpected
+nonzero schema count, failed SQL process, PostgreSQL 16, PostgreSQL 18,
+malformed server version, and failed version probe). Its exact GitHub blobs
+matched the locally syntax-checked and executed scripts:
+`tests/pg17-ddl-contract.bash` =
+`445fd679fa4024e5cd479581f953ac2bc195b6ad`,
+`tests/verify-pg17-ddl-host.bash` =
+`7170ed9c321bde1e29043dd747b61ea18a56b358`.
+
+The previous **5/5** and **9/9** evidence belongs to earlier host script
+blobs. This **10/10** result proves only fake-psql control flow; no real PostgreSQL 17 process ran.
+
+**Actual PostgreSQL 17 SQL execution: pending until a CI runner admits the
+service job, or an authorized disposable database is supplied.** Native JDK25
+Oreslang compilation, driver parameter binding, cancellation, independent
+tenant RLS and five-backend parity remain distinct unfulfilled gates. The
+SQL-only job must not be counted as native or production release evidence.
 
 ## Future Diesel/SeaORM generated-ORM acceptance suite (NOT EXECUTED)
 

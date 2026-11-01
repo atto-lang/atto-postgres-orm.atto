@@ -4,8 +4,14 @@ on:
     paths:
       - 'scripts/verify-native-plans'
       - 'scripts/ores'
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/negative/**'
+      - 'SOURCE_REF'
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
+      - 'tests/pg17-ddl-contract.bash'
+      - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   push:
     branches:
@@ -13,8 +19,14 @@ on:
     paths:
       - 'scripts/verify-native-plans'
       - 'scripts/ores'
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/negative/**'
+      - 'SOURCE_REF'
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
+      - 'tests/pg17-ddl-contract.bash'
+      - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   workflow_dispatch:
 permissions:
@@ -36,10 +48,13 @@ jobs:
           bash -n tests/verify-launcher-host.bash
           bash -n scripts/verify-native-plans
           bash -n tests/verify-native-plans-host.bash
-      - name: Ten verifier and eight launcher host-only failure-injection suites
+          bash -n tests/pg17-ddl-contract.bash
+          bash -n tests/verify-pg17-ddl-host.bash
+      - name: Host-only failure-injection suites (10 verifier, 11 launcher, 10 SQL mocks)
         shell: bash
         run: |
           set -euo pipefail
           bash tests/verify-native-plans-host.bash
           bash tests/verify-launcher-host.bash
+          bash tests/verify-pg17-ddl-host.bash
           printf '%s\n' 'HOST_ONLY_VERIFIER_TESTS_COMPLETE: No native Oreslang guest or PostgreSQL executed'
