@@ -880,5 +880,111 @@ class CatalogContractTests(unittest.TestCase):
             walk(schema)
 
 
+
+    def test_pg17_history_shell_syntax_and_sql_gate(self):
+        """Host-only shell/SQL shape check; no PostgreSQL backend was called."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash unavailable")
+        script = ROOT / "tests/pg17-migration-history-e2e.bash"
+        proc = subprocess.run([shell, "-n", str(script)],
+                              capture_output=True, text=True, check=False)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        sql = (ROOT / "tests/pg17-migration-history-e2e.sql").read_text(encoding="utf-8")
+        for marker in (
+            "BEGIN;", "ROLLBACK;", "CREATE TABLE applied_migrations",
+            "CREATE FUNCTION record_migration", "MIGRATION_CHECKSUM_DRIFT",
+            "MIGRATION_ORDER_DRIFT", "INVALID_MIGRATION_IDENTITY",
+            "FORGED_REPLAY_NOT_REJECTED", "OUT_OF_ORDER_NOT_REJECTED",
+            "INVALID_VERSION_NOT_REJECTED", "INVALID_DIGEST_NOT_REJECTED",
+            "pg_catalog.pg_namespace", "GET STACKED DIAGNOSTICS",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, sql)
+        self.assertNotIn("\nCOMMIT;", sql, "test must be rollback-only")
+        workflow = (ROOT / ".github/workflows/pg17-ddl-integration.yml").read_text(
+            encoding="utf-8")
+        self.assertIn("tests/pg17-migration-history-e2e.bash", workflow)
+
+    def test_pg17_history_missing_opt_in_never_contacts_psql(self):
+        """A false success without explicit disposable opt-in is forbidden."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            called = directory / "psql-called"
+            fake = directory / "psql"
+            fake.write_text(
+                '#!/bin/sh\nprintf "called\\n" >> "$PG_MOCK_CONTACT"\n'
+                'exit 0\n', encoding="utf-8")
+            fake.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
+            env["PG_MOCK_CONTACT"] = str(called)
+            env["PG_TEST_DSN"] = "postgresql://invalid/db"
+            env.pop("PG_TEST_DISPOSABLE", None)
+            process = subprocess.run(
+                [shell, str(ROOT / "tests/pg17-migration-history-e2e.bash")],
+                env=env, capture_output=True, text=True, check=False)
+            self.assertNotEqual(process.returncode, 0)
+            self.assertIn("PG_HISTORY_E2E_NOT_VERIFIED:", process.stderr)
+            self.assertFalse(called.exists(), "unauthorized database contacted")
+
+    def test_pg17_history_fake_psql_receipt_mutations(self):
+        """Real subprocess tests of parser gates; fake psql is not PG17."""
+        shell = shutil.which("bash")
+        if shell is None:
+            self.skipTest("bash unavailable")
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = pathlib.Path(tmp)
+            fake = directory / "psql"
+            fake.write_text(
+                '#!/bin/sh\n'
+                'case " $* " in\n'
+                '  *" -c "*) printf "%s\\n" "$PG_MOCK_VERSION"; exit 0;;\n'
+                'esac\n'
+                'printf "%s\\n" "$PG_MOCK_RECEIPT"\n'
+                'exit "${PG_MOCK_EXIT:-0}"\n',
+                encoding="utf-8")
+            fake.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
+            env["PG_TEST_DSN"] = "postgresql://invalid/db"
+            env["PG_TEST_DISPOSABLE"] = "I_ACKNOWLEDGE_DISPOSABLE_DATABASE"
+            expected = "APPLIED\\nREPLAY_OK\\nAPPLIED\\n2\\n1\\nPG17_MIGRATION_HISTORY_E2E_OK\\n0"
+            script = str(ROOT / "tests/pg17-migration-history-e2e.bash")
+            for version in ("160001", "180001", "seventeen", "17"):
+                env["PG_MOCK_VERSION"] = version
+                env["PG_MOCK_RECEIPT"] = expected
+                with self.subTest(version=version):
+                    proc = subprocess.run([shell, script], env=env,
+                                          capture_output=True, text=True)
+                    self.assertNotEqual(proc.returncode, 0)
+                    self.assertIn("PG_HISTORY_E2E_NOT_VERIFIED:", proc.stderr)
+            env["PG_MOCK_VERSION"] = "170001"
+            for label, receipt, code in (
+                ("correct-mock", expected, 0),
+                ("missing-replay", expected.replace("REPLAY_OK\\n", ""), 1),
+                ("truncated", expected.rsplit("\\n", 1)[0], 1),
+                ("wrong-count", expected.replace("\\n2\\n1\\n", "\\n3\\n1\\n"), 1),
+                ("unexpected-success", "APPROVED", 1),
+            ):
+                env["PG_MOCK_RECEIPT"] = receipt
+                env["PG_MOCK_EXIT"] = "0"
+                with self.subTest(case=label):
+                    proc = subprocess.run([shell, script], env=env,
+                                          capture_output=True, text=True)
+                    self.assertEqual(proc.returncode == 0, code == 0, proc.stderr)
+                    if code != 0:
+                        self.assertIn("PG_HISTORY_E2E_NOT_VERIFIED:", proc.stderr)
+            env["PG_MOCK_RECEIPT"] = expected
+            env["PG_MOCK_EXIT"] = "42"
+            proc = subprocess.run([shell, script], env=env,
+                                  capture_output=True, text=True)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("PG_HISTORY_E2E_NOT_VERIFIED:", proc.stderr)
+
+
 if __name__ == "__main__":
     unittest.main()
