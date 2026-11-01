@@ -290,7 +290,45 @@ class CatalogContractTests(unittest.TestCase):
             self.assertIn(marker, script)
         self.assertIn("Pure Oreslang adversarial schema contracts passed", guest)
         self.assertIn("missing-schema-adversarial-oracle", mock)
-        self.assertIn("MOCK_HOST_GATE_SCENARIOS=11/11 PASS", mock)
+        self.assertIn("missing-schema-invariants-oracle", mock)
+        self.assertIn("MOCK_HOST_GATE_SCENARIOS=12/12 PASS", mock)
+
+
+    def test_metamorphic_guest_receipt_is_required(self):
+        """Only check source registration; does not claim guest execution."""
+        verifier = (ROOT / "scripts/verify-native-plans").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/schema-invariants.ores").read_text(encoding="utf-8")
+        mock = (ROOT / "tests/verify-native-plans-host.bash").read_text(encoding="utf-8")
+        self.assertIn(
+            "run_guest schema-invariants tests/schema-invariants.ores schema-invariants-positive",
+            verifier,
+        )
+        self.assertIn("schema-invariants", verifier)
+        self.assertIn("native guest receipt row count mismatch", verifier)
+        self.assertIn(' -eq 8 ]]', verifier)
+        self.assertIn("Pure Oreslang schema invariant and metamorphic contracts passed", guest)
+        self.assertIn("MOCK_SKIP_SCHEMA_INVARIANTS", mock)
+        self.assertIn("missing-schema-invariants-oracle", mock)
+        self.assertIn("MOCK_HOST_GATE_SCENARIOS=12/12 PASS", mock)
+
+    def test_metamorphic_semantic_invariants_are_authored(self):
+        """Source-only suite coverage guard, never an Oreslang test result."""
+        guest = (ROOT / "tests/schema-invariants.ores").read_text(encoding="utf-8")
+        for marker in (
+            "table permutation emitted DDL",
+            "cross-table physical-name collision admitted",
+            "rename bypassed human review",
+            "reverse drop risk not destructive",
+            "same model preview was nondeterministic",
+            "unsupported nullable class lowered",
+            "forged table in descriptor",
+            "UUID mapped without nominal codec",
+            "empty review status missing",
+            "executable SQL op forged into review",
+        ):
+            with self.subTest(marker=marker):
+                self.assertIn(marker, guest)
+        self.assertGreaterEqual(guest.count("panic("), 55)
 
 
 if __name__ == "__main__":
