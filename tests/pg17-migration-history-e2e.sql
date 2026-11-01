@@ -19,8 +19,9 @@ CREATE TABLE applied_migrations (
 );
 CREATE FUNCTION record_migration(phase integer, digest_hex text)
 RETURNS text LANGUAGE plpgsql AS $record$
-DECLARE prior_digest text;
-DECLARE last_version integer;
+DECLARE
+  prior_digest text;
+  last_version integer;
 BEGIN
   IF phase <= 0 OR digest_hex !~ '^[0-9a-f]{64}$' THEN
     RAISE EXCEPTION USING ERRCODE = '23514', MESSAGE = 'INVALID_MIGRATION_IDENTITY';
