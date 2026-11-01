@@ -60,6 +60,22 @@ table/column strings are bounded by conservative identifier validation.
 authority. This is an **SQL planning layer only**, not a driver, PostgreSQL
 execution proof, completed Serde/Zorde adapters or compile-time checked DSL.
 
+## Bounded multi-column patching and explicit projections (native source; guest unverified)
+
+`plan_schema_update_fields_checked` accepts at most **eight** distinct schema
+fields, validates even omitted/unchanged entries, and produces one deterministic
+`UPDATE` with a separately ordered `DbValue` bind sequence. No-op patches
+return an empty SQL plan and zero binds; `Set(None)` produces a typed SQL NULL
+bind for nullable fields, never an omitted assignment. Primary/tenant keys are
+not patchable. Placeholder numbering comes from a fixed allowlist, not input
+text. The only available bind codecs remain text, UUID and boolean.
+
+`plan_schema_select_columns_checked` permits 1–16 explicitly listed declared
+columns and returns a `TypedSelectPlan` with two UUID-tagged, private bind
+values. It rejects `SELECT *`, duplicate/missing columns and untrusted SQL
+fragments. Neither API opens connections or verifies RLS; these are **source
+changes awaiting an actual Oreslang compiler/guest test**.
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and

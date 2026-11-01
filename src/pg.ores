@@ -168,6 +168,41 @@ pub define class TypedPatchPlan as
   }
 end
 
+ // Schema-checked multi-field update input. Each entry represents exactly
+ // one declared column, even when its change state causes no SQL assignment.
+pub define class PgFieldPatch as
+  pub val string name;
+  pub val FieldChange change;
+  pub constructor(string name, FieldChange change) {
+    self.name = name;
+    self.change = change;
+  }
+end
+
+// Read-only, actor-local select plan with typed, copied bound parameters.
+// No database connection, RLS admission or cross-actor Sendable claim.
+pub define class TypedSelectPlan as
+  pub val string sql;
+  val Array<DbValue> saved_values;
+  pub constructor(string sql, Array<DbValue> values) {
+    self.sql = sql;
+    let Array<DbValue> copy = arr[];
+    for (val value of values) {
+      copy.add(value);
+    }
+    self.saved_values = copy;
+  }
+  pub param_count(): int {
+    return self.saved_values.size;
+  }
+  pub param_at(int index): Result<DbValue, string> {
+    if index < 0 || index >= self.saved_values.size then
+      return Err("typed select parameter index out of bounds");
+    fi
+    return Ok(self.saved_values.get(index));
+  }
+end
+
 define module pg as
   // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
   // This is NOT full UTF-8 byte-length validation; legacy SQL methods
@@ -596,6 +631,138 @@ define module pg as
       + " WHERE workspace_id = $2::uuid AND id = $3::uuid";
     return Ok(new TypedPatchPlan(sql, false, arr[
       change.value, workspace_value.unwrap(), id_value.unwrap()
+    ]));
+  }
+  // API factory avoids relying on unqualified cross-module class imports.
+  pub fnc field_patch(string field_name, FieldChange change): PgFieldPatch {
+    return new PgFieldPatch(field_name, change);
+  }
+  // This narrow, deterministic SQL patch planner admits at most 8 distinct
+  // schema-declared columns. Every provided entry, including a no-op, is
+  // validated before any SQL is returned. Values are always separate binds.
+  pub fnc plan_schema_update_fields_checked(
+    PgTableDescriptor descriptor,
+    Array<PgFieldPatch> patch_fields,
+    string workspace,
+    string id
+  ): Result<TypedPatchPlan, string> {
+    val columns = descriptor.columns();
+    if table_descriptor_checked(descriptor.name, columns).is_err() then
+      return Err("unadmitted or malformed table descriptor");
+    fi
+    if patch_fields.size > 8 then return Err("too many PostgreSQL patch fields"); fi
+    if !canonical_uuid(workspace) || !canonical_uuid(id) then
+      return Err("invalid patch workspace or record UUID");
+    fi
+    let Array<string> names_seen = arr[];
+    let Array<DbValue> binds = arr[];
+    let string assignments = "";
+    // No dynamic integer-to-string SQL coercion: only these ten fixed slots
+    // are emitted, with two reserved for the workspace and record UUID.
+    val slots = arr["$1", "$2", "$3", "$4", "$5", "$6", "$7",
+      "$8", "$9", "$10"];
+    for (val edit of patch_fields) {
+      if !admitted_identifier(edit.name) then
+        return Err("unadmitted patch field identifier");
+      fi
+      for (val previous of names_seen) {
+        if previous == edit.name then return Err("duplicate patch field"); fi
+      }
+      names_seen.add(edit.name);
+      let bool found = false;
+      let ColumnSpec column_decl = new ColumnSpec("invalid", "text", false);
+      for (val column of columns) {
+        if column.name == edit.name then
+          column_decl = column;
+          found = true;
+        fi
+      }
+      if !found then return Err("patch field not declared in schema"); fi
+      if edit.name == "id" || edit.name == "workspace_id" then
+        return Err("cannot patch primary key or tenant key");
+      fi
+      if edit.change.state != "set" && edit.change.state != "unchanged"
+        && edit.change.state != "not_set" then
+        return Err("invalid patch change state");
+      fi
+      if !admitted_db_value(edit.change.value) then
+        return Err("invalid patch field value");
+      fi
+      if edit.change.state != "not_set" then
+        if edit.change.value.kind != column_decl.kind then
+          return Err("patch bind type mismatch");
+        fi
+        if edit.change.value.is_null && !column_decl.nullable then
+          return Err("NULL patch for nonnullable column");
+        fi
+        if edit.change.state == "set" then
+          if binds.size > 0 then assignments = assignments + ", "; fi
+          assignments = assignments + ident(edit.name) + " = "
+            + slots.get(binds.size) + "::" + column_decl.kind;
+          binds.add(edit.change.value);
+        fi
+      fi
+    }
+    // Empty/all-unchanged/all-omitted patches perform zero database I/O.
+    if binds.size == 0 then
+      return Ok(new TypedPatchPlan("", true, arr[]));
+    fi
+    val workspace_bind = db_uuid_checked(workspace);
+    val id_bind = db_uuid_checked(id);
+    if workspace_bind.is_err() then return Err("invalid workspace bind"); fi
+    if id_bind.is_err() then return Err("invalid record bind"); fi
+    val sql = "UPDATE " + ident(descriptor.name) + " SET " + assignments
+      + " WHERE workspace_id = " + slots.get(binds.size) + "::uuid"
+      + " AND id = " + slots.get(binds.size + 1) + "::uuid";
+    binds.add(workspace_bind.unwrap());
+    binds.add(id_bind.unwrap());
+    return Ok(new TypedPatchPlan(sql, false, binds));
+  }
+
+  // Schema-scoped explicit projections. Never SELECT *, accept arbitrary
+  // projection SQL, or infer tenant authority from workspace text.
+  pub fnc plan_schema_select_columns_checked(
+    PgTableDescriptor descriptor,
+    Array<string> selected_columns,
+    string workspace,
+    string id
+  ): Result<TypedSelectPlan, string> {
+    val columns = descriptor.columns();
+    if table_descriptor_checked(descriptor.name, columns).is_err() then
+      return Err("unadmitted or malformed table descriptor");
+    fi
+    if selected_columns.size == 0 || selected_columns.size > 16 then
+      return Err("projection requires 1 to 16 columns");
+    fi
+    if !canonical_uuid(workspace) || !canonical_uuid(id) then
+      return Err("invalid select workspace or record UUID");
+    fi
+    let Array<string> seen = arr[];
+    let string projection = "";
+    for (val selected of selected_columns) {
+      if !admitted_identifier(selected) then
+        return Err("unadmitted projection column");
+      fi
+      for (val previous of seen) {
+        if previous == selected then return Err("duplicate projection column"); fi
+      }
+      let bool declared = false;
+      for (val column of columns) {
+        if column.name == selected then declared = true; fi
+      }
+      if !declared then return Err("projection column not declared"); fi
+      if seen.size > 0 then projection = projection + ", "; fi
+      projection = projection + ident(selected);
+      seen.add(selected);
+    }
+    val workspace_bind = db_uuid_checked(workspace);
+    val id_bind = db_uuid_checked(id);
+    if workspace_bind.is_err() then return Err("invalid workspace bind"); fi
+    if id_bind.is_err() then return Err("invalid record bind"); fi
+    val sql = "SELECT " + projection + " FROM " + ident(descriptor.name)
+      + " WHERE workspace_id = $1::uuid AND id = $2::uuid";
+    return Ok(new TypedSelectPlan(sql, arr[
+      workspace_bind.unwrap(), id_bind.unwrap()
     ]));
   }
 end

@@ -235,3 +235,14 @@ columns and unsupported types, prevent mutation of the original/returned
 column arrays, and reject patch fields missing from the declared schema.
 These are **unexecuted guest assertions**, not proof that `PgTableDescriptor`
 is a compiler-generated nominal capability or PostgreSQL tenant authority.
+
+## New multi-field planner and projection checks (not executed in a native guest)
+
+`tests/plans.ores` contains data/SQL goldens and adversarial checks for
+`plan_schema_update_fields_checked` and `plan_schema_select_columns_checked`:
+canonical multi-column SQL with typed placeholder order; bound hostile text;
+explicit nullable NULL versus omitted/unchanged; empty/no-op updates; duplicate
+field admission; schema-only field scope; immutable tenant/id; mismatched
+codec/NULL; 8-field admission boundary; projection wildcard/unknown/duplicate/
+injected columns; tenant UUIDs and parameter bounds. These are **source-authored
+assertions only** until the exact pinned compiler and PostgreSQL driver run.
