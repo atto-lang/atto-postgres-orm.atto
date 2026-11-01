@@ -216,3 +216,16 @@ ASCII identifier admission boundary, complete eight-kind whitelist, rejected
 SQL/database type strings, and every operation's inability to add SQL,
 approval flags, or expanded scope. These are validator/source-level checks,
 not PostgreSQL, TypeSpec or native Oreslang execution evidence.
+
+
+## Host admission oracle mutation cases (stage 7, awaiting runner)
+
+The exact-head mock harness now authors 17 distinct cases including five
+new failure injections for valid-looking but untrustworthy guest stdout,
+nonzero positive exits, reserved launcher exit 69, false-success negative
+exits and surplus negative stdout. These are deliberately **fake compiler
+oracles** and can only validate harness fail-closed wiring once executed.
+No mock pass counts as native Oreslang execution. The seventh guest includes
+independent three-way migration snapshot assertions; the suite remains
+blocked until a private-source-authorized JDK 25 runner executes the pinned
+compiler and all seven required guest oracles.

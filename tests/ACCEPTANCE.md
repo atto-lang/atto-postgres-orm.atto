@@ -280,3 +280,23 @@ SQL-only job must not be counted as native or production release evidence.
 ## Native pinned-compiler schema regression extension (not yet executed)
 
 The six-oracle scripts/verify-native-plans path now demands the existing PostgreSQL planner positive and three negative guest cases plus tests/schema-plans.ores and tests/schema-adversarial.ores. Every stdout is exact-compared; nonzero, missing or reordered cases fail the receipt, and both additional guest sources are included in provenance hashes. tests/verify-native-plans-host.bash deliberately withholds the new adversarial sentinel to test fail-closed admission. The new Oreslang suite has 83 explicit panic assertions with parameterized kind and risk cases. These remain authored source, not compiler-backed evidence until an exact-head native job executes.
+
+## Seven native oracles: additional metamorphic catalog guest (authored, NOT executed)
+
+`tests/schema-invariants.ores` adds 57 native Oreslang assertions on empty/ordered/reordered catalogs, creation/deletion inverse direction, manual stable-ID renames, name collisions, nullable add-vs-destructive reverse diff, deterministic nominal class previews, unsupported UUID/nullable types, malformed public descriptors, and deny-by-default review manifests. `scripts/verify-native-plans` now pins the seventh guest, fingerprints its exact source, compares stdout, and requires eight receipt rows including the header. The host mock harness adds missing-invariants-sentinel rejection and reports 12 mock scenarios. No native compiler or PostgreSQL evidence is claimed.
+
+
+## Eight additional fail-closed host/mock injection branches (draft verification)
+
+The seven-required-guest exact-head harness remains unchanged. The **mock**
+self-test suite grows from 12 to **17 scenarios**: successful fake baseline
+plus deliberate missing-guest, broken provenance, invalid JDK/SDK, and five
+new signal-substitution cases (zero-exit but wrong stdout, valid stdout but
+nonzero exit, launcher sentinel rc=69, negative guest erroneously succeeding,
+and unexpected output from a negative guest). The 17/17 label is the **expected
+mock-harness result**, never a claim that native execution occurred.
+
+The seventh Oreslang guest adds independent three-way
+`plan_from_snapshot_checked` cases for fresh, stale, malformed and permuted
+snapshots, including a desired state that happens to equal unauthorized
+observed drift. Both native and shell smoke tests need a stepful trusted run.

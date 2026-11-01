@@ -30,6 +30,8 @@ grep -Fq 'run_guest schema-plans tests/schema-plans.ores schema-positive' "$root
 grep -Fq 'run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive' "$root/scripts/verify-native-plans"
 grep -Fq 'Pure Oreslang adversarial schema contracts passed' "$root/tests/schema-adversarial.ores"
 grep -Fq 'tests/schema-adversarial.ores' "$root/scripts/verify-native-plans"
+grep -Fq 'run_guest schema-invariants tests/schema-invariants.ores schema-invariants-positive' "$root/scripts/verify-native-plans"
+grep -Fq 'Pure Oreslang schema invariant and metamorphic contracts passed' "$root/tests/schema-invariants.ores"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-harness-mock.XXXXXXXX")"
 trap 'rm -rf "$work"' EXIT
 mkdir -p "$work/orm/scripts" "$work/orm/src" "$work/orm/tests/negative" "$work/compiler" "$work/bin"
@@ -41,7 +43,17 @@ case "$1" in
   tests/plans.ores)
     echo 'Postgres SQL planning contracts passed'; exit 0;;
   tests/schema-plans.ores)
+    if [[ "${MOCK_BAD_POSITIVE_STDOUT:-}" == yes ]]; then
+      echo 'SCHEMA_GUEST_STDOUT_CORRUPTED'; exit 0
+    fi
     echo 'Pure Oreslang schema-diff planning contracts passed'; exit 0;;
+  tests/schema-invariants.ores)
+    if [[ "${MOCK_SKIP_SCHEMA_INVARIANTS:-}" == yes ]]; then
+      echo 'MISSING_INVARIANTS_SENTINEL'; exit 0
+    fi
+    echo 'Pure Oreslang schema invariant and metamorphic contracts passed'
+    if [[ "${MOCK_BAD_POSITIVE_EXIT:-}" == yes ]]; then exit 13; fi
+    exit 0;;
   tests/schema-adversarial.ores)
     if [[ "${MOCK_SKIP_SCHEMA_ADVERSARIAL:-}" == yes ]]; then
       echo 'NOT_A_REAL_GUEST_RESULT'; exit 0
@@ -54,18 +66,22 @@ case "$1" in
     else
       echo 'invalid PostgreSQL identifier surface' >&2
     fi
+    if [[ "${MOCK_LAUNCHER_EXIT_69:-}" == yes ]]; then exit 69; fi
     exit 17;;
   tests/negative/empty_table.ores)
     echo PG_NEGATIVE_EMPTY_TABLE_STARTED
+    if [[ "${MOCK_NEGATIVE_EXTRA_STDOUT:-}" == yes ]]; then echo 'EXTRA_UNTRUSTED_OUTPUT'; fi
     echo 'PostgreSQL table requires at least one column' >&2; exit 18;;
   tests/negative/control_identifier.ores)
     echo PG_NEGATIVE_CONTROL_IDENTIFIER_STARTED
-    echo 'invalid PostgreSQL identifier surface' >&2; exit 19;;
+    echo 'invalid PostgreSQL identifier surface' >&2
+    if [[ "${MOCK_NEGATIVE_ZERO_EXIT:-}" == yes ]]; then exit 0; fi
+    exit 19;;
   *) echo "unexpected mocked guest $1" >&2; exit 127;;
 esac
 MOCK_GUEST
 chmod +x "$work/orm/scripts/ores" "$work/orm/scripts/verify-native-plans"
-for path in src/pg.ores src/schema.ores tests/plans.ores tests/schema-plans.ores tests/schema-adversarial.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
+for path in src/pg.ores src/schema.ores tests/plans.ores tests/schema-plans.ores tests/schema-adversarial.ores tests/schema-invariants.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
   echo 'MOCK PLACEHOLDER, NOT ORESLANG SOURCE' > "$work/orm/$path"
 done
 cat > "$work/bin/java" <<'MOCK_JAVA'
@@ -104,7 +120,7 @@ run_case() {
   set -e
   if [[ "$expectation" == pass ]]; then
     [[ "$rc" -eq 0 && "$(cut -f3 "$evidence/outcomes.tsv" | tail -n+2 | sort -u)" == PASS
-       && $(wc -l < "$evidence/outcomes.tsv") -eq 7
+       && $(wc -l < "$evidence/outcomes.tsv") -eq 8
        && "$(cat "$evidence/RESULT.txt")" == VERIFIED:* ]] ||
       { echo "MOCK HARNESS $scenario unexpected rejection (exit $rc)" >&2; cat "$output.stderr" >&2; exit 1; }
   else
@@ -120,6 +136,9 @@ run_case normal-mocked-oracles pass
 export MOCK_SKIP_SCHEMA_ADVERSARIAL=yes
 run_case missing-schema-adversarial-oracle reject
 unset MOCK_SKIP_SCHEMA_ADVERSARIAL
+export MOCK_SKIP_SCHEMA_INVARIANTS=yes
+run_case missing-schema-invariants-oracle reject
+unset MOCK_SKIP_SCHEMA_INVARIANTS
 export MOCK_SKIP_SENTINEL=yes
 run_case missing-negative-sentinel reject
 unset MOCK_SKIP_SENTINEL
@@ -147,4 +166,19 @@ run_case ignored-compiler-input reject
 rm "$work/compiler/src/ignored-compiler.java"
 printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
 run_case dirty-worktree reject
-echo 'MOCK_HOST_GATE_SCENARIOS=11/11 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
+export MOCK_BAD_POSITIVE_STDOUT=yes
+run_case bad-positive-stdout reject
+unset MOCK_BAD_POSITIVE_STDOUT
+export MOCK_BAD_POSITIVE_EXIT=yes
+run_case bad-positive-exit reject
+unset MOCK_BAD_POSITIVE_EXIT
+export MOCK_LAUNCHER_EXIT_69=yes
+run_case launcher-exit-69 reject
+unset MOCK_LAUNCHER_EXIT_69
+export MOCK_NEGATIVE_ZERO_EXIT=yes
+run_case negative-zero-exit reject
+unset MOCK_NEGATIVE_ZERO_EXIT
+export MOCK_NEGATIVE_EXTRA_STDOUT=yes
+run_case negative-extra-stdout reject
+unset MOCK_NEGATIVE_EXTRA_STDOUT
+echo 'MOCK_HOST_GATE_SCENARIOS=17/17 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
