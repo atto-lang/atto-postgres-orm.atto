@@ -13,8 +13,25 @@ from jsonschema import Draft202012Validator, ValidationError
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
+def parse_strict_json(source):
+    """Reject ambiguous JSON keys and non-JSON numeric constants before validation."""
+    def unique_keys(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError("duplicate JSON key: " + key)
+            result[key] = value
+        return result
+
+    def non_json_constant(value):
+        raise ValueError("non-JSON numeric constant: " + value)
+
+    return json.loads(source, object_pairs_hook=unique_keys,
+                      parse_constant=non_json_constant)
+
+
 def load(name):
-    return json.loads((ROOT / name).read_text(encoding="utf-8"))
+    return parse_strict_json((ROOT / name).read_text(encoding="utf-8"))
 
 
 class CatalogContractTests(unittest.TestCase):
@@ -553,6 +570,157 @@ class CatalogContractTests(unittest.TestCase):
                     for nested in value:
                         walk(nested)
             walk(schema)
+
+
+    def test_all_catalog_identifiers_reject_terminal_newline(self):
+        """Regression: regex $ alone accepts a string ending with a lone LF."""
+        selector_fields = (
+            (lambda d: d["tables"][0], "stable_id"),
+            (lambda d: d["tables"][0], "name"),
+            (lambda d: d["tables"][0]["columns"][0], "stable_id"),
+            (lambda d: d["tables"][0]["columns"][0], "name"),
+        )
+        terminal_bytes = ("\n", "\r", "\r\n", "\t", "\x00", "\x7f",
+                          "\u0085", "\u2028", "\u2029")
+        for select, field in selector_fields:
+            for length in (1, 7, 62, 63):
+                for tail in terminal_bytes:
+                    candidate = copy.deepcopy(self.current)
+                    select(candidate)[field] = "a" * length + tail
+                    with self.subTest(field=field, length=length, tail=repr(tail)):
+                        with self.assertRaises(ValidationError):
+                            self.validator.validate(candidate)
+            candidate = copy.deepcopy(self.current)
+            select(candidate)[field] = "a" * 63
+            with self.subTest(field=field, valid="63_ascii"):
+                self.validator.validate(candidate)
+
+    def test_review_id_end_anchor_all_operations(self):
+        """Operation-risk pairs cannot carry LF-smuggled stable identities."""
+        validator = Draft202012Validator(load("contracts/orm-plan-preview.schema.json"))
+        op_risk = (
+            ("review_table_rename", "manual"),
+            ("review_create_table", "manual"),
+            ("review_drop_table", "destructive"),
+            ("review_column_rename", "manual"),
+            ("review_type_change", "manual"),
+            ("drop_not_null", "safe"),
+            ("add_nullable_column", "safe"),
+            ("set_not_null", "preflight"),
+            ("add_required_column", "preflight"),
+            ("drop_column", "destructive"),
+        )
+        base = load("contracts/examples/plan-preview.json")
+        for operation, risk in op_risk:
+            step = {"op": operation, "table_id": "valid",
+                    "column_id": "" if operation.startswith("review_") and
+                    operation in ("review_table_rename", "review_create_table",
+                                  "review_drop_table") else "valid",
+                    "risk": risk}
+            candidate = copy.deepcopy(base)
+            candidate["steps"] = [step]
+            with self.subTest(operation=operation, valid=True):
+                validator.validate(candidate)
+            for key in ("table_id", "column_id"):
+                if key == "column_id" and not step[key]:
+                    continue
+                for tail in ("\n", "\r\n", "\u2028", "\x00", "\t"):
+                    changed = copy.deepcopy(candidate)
+                    changed["steps"][0][key] += tail
+                    with self.subTest(operation=operation, key=key,
+                                      tail=repr(tail)):
+                        with self.assertRaises(ValidationError):
+                            validator.validate(changed)
+        # Table-level operations alone allow an empty column identity.
+        for operation, risk in op_risk[:3]:
+            candidate = copy.deepcopy(base)
+            candidate["steps"] = [{"op": operation, "table_id": "a",
+                                   "column_id": "\n", "risk": risk}]
+            with self.assertRaises(ValidationError):
+                validator.validate(candidate)
+
+    def test_identifier_regex_has_absolute_end_guard_on_both_peers(self):
+        """String-level TypeSpec parity guard; NOT an emitter semantic test."""
+        identifier_pattern = r"^[A-Za-z_][A-Za-z0-9_]*(?![\s\S])"
+        empty_or_identifier = r"^(?:[A-Za-z_][A-Za-z0-9_]*)?(?![\s\S])"
+        catalog = load("contracts/orm-catalog.schema.json")
+        preview = load("contracts/orm-plan-preview.schema.json")
+        for shape in ("Table", "Column"):
+            for field in ("stable_id", "name"):
+                with self.subTest(shape=shape, field=field):
+                    self.assertEqual(catalog["$defs"][shape]["properties"][field]
+                                     ["pattern"], identifier_pattern)
+        self.assertEqual(preview["$defs"]["Step"]["properties"]["table_id"]
+                         ["pattern"], identifier_pattern)
+        self.assertEqual(preview["$defs"]["Step"]["properties"]["column_id"]
+                         ["pattern"], empty_or_identifier)
+        tsp = (ROOT / "contracts/orm-catalog.tsp").read_text(encoding="utf-8")
+        escaped_tsp_pattern = identifier_pattern.replace("\\", "\\\\")
+        self.assertEqual(tsp.count('@pattern("' + escaped_tsp_pattern + '")'), 4)
+
+    def test_strict_parser_rejects_duplicate_identity_and_approval_keys(self):
+        """Prevent parser-specific 'first key wins'/'last key wins' confusion."""
+        for source in (
+            '{"approved":true,"approved":false}',
+            '{"approved":false,"approved":true}',
+            '{"schema_version":"v1","schema_version":"v2"}',
+            '{"stable_id":"tenantA","stable_id":"tenantB"}',
+            '{"tables":[{"name":"a","name":"b"}]}',
+            '{"steps":[{"op":"drop_column","risk":"safe","risk":"destructive"}]}',
+            '{"x":NaN}', '{"x":Infinity}', '{"x":-Infinity}',
+        ):
+            with self.subTest(source=source):
+                with self.assertRaises(ValueError):
+                    parse_strict_json(source)
+        self.assertEqual(parse_strict_json('{"a":{"b":false},"c":[] }'),
+                         {"a": {"b": False}, "c": []})
+
+    def test_unsupported_schema_keywords_cannot_be_injected(self):
+        """Closed schemas reject attempts to smuggle DDL or execution hints."""
+        catalog = load("contracts/orm-catalog.schema.json")
+        validator = Draft202012Validator(catalog)
+        for key, value in (
+            ("$schema", "https://example.com/evil"),
+            ("$ref", "https://example.com/remote.json"),
+            ("$defs", {"sql": "DROP TABLE users"}),
+            ("x-migrate", {"apply": True}),
+            ("migrations", ["DROP TABLE users"]),
+            ("tenant_role", "postgres"),
+        ):
+            for level in ("catalog", "table", "column"):
+                candidate = copy.deepcopy(self.current)
+                container = (candidate if level == "catalog"
+                             else candidate["tables"][0] if level == "table"
+                             else candidate["tables"][0]["columns"][0])
+                container[key] = value
+                with self.subTest(key=key, level=level):
+                    with self.assertRaises(ValidationError):
+                        validator.validate(candidate)
+
+    def test_valid_preview_cannot_turn_into_an_executable_migration(self):
+        """Review-only manifests never authorize SQL, including empty plans."""
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        example = load("contracts/examples/plan-preview.json")
+        for steps in ([], example["steps"], [
+            {"op": "add_nullable_column", "table_id": "docs",
+             "column_id": "flag", "risk": "safe"}
+        ]):
+            candidate = copy.deepcopy(example)
+            candidate["steps"] = steps
+            validator.validate(candidate)
+            for key, value in (
+                ("status", "APPLY"),
+                ("approved", True),
+                ("scope", "full_catalog"),
+                ("sql", "ALTER TABLE docs ADD COLUMN flag TEXT"),
+                ("execution_role", "postgres"),
+            ):
+                promoted = copy.deepcopy(candidate)
+                promoted[key] = value
+                with self.subTest(steps=len(steps), key=key):
+                    with self.assertRaises(ValidationError):
+                        validator.validate(promoted)
 
 
 if __name__ == "__main__":
