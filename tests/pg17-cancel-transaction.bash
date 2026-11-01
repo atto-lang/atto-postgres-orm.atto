@@ -48,16 +48,25 @@ client_pid=$!
 
 backend_pid=""
 for _ in $(seq 1 60); do
-  backend_pid="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "app=$app" "$PG_TEST_DSN" \
-    -c "SELECT pid FROM pg_stat_activity WHERE application_name = :'app' AND state = 'active' AND query LIKE '%pg_sleep%' ORDER BY pid LIMIT 1")" || true
+  backend_pid="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "app=$app" "$PG_TEST_DSN" <<'SQL'
+SELECT pid
+FROM pg_stat_activity
+WHERE application_name = :'app'
+  AND state = 'active'
+  AND query LIKE '%pg_sleep%'
+ORDER BY pid
+LIMIT 1;
+SQL
+)" || true
   [[ "$backend_pid" =~ ^[0-9]+$ ]] && break
   sleep 0.2
 done
 [[ "$backend_pid" =~ ^[0-9]+$ ]] || fail 'sleeping backend was not observed'
 
-cancelled="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "target_pid=$backend_pid" "$PG_TEST_DSN" \
-  -c "SELECT pg_cancel_backend(:'target_pid'::int)")" ||
-  fail 'pg_cancel_backend call failed'
+cancelled="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "target_pid=$backend_pid" "$PG_TEST_DSN" <<'SQL'
+SELECT pg_cancel_backend(:'target_pid'::int);
+SQL
+)" || fail 'pg_cancel_backend call failed'
 [[ "$cancelled" == "t" ]] || fail "backend cancellation returned: $cancelled"
 
 set +e
@@ -70,9 +79,10 @@ grep -Fq '57014' "$tmp/stderr" || fail 'cancelled session lacked SQLSTATE 57014'
 grep -Fq 'canceling statement due to user request' "$tmp/stderr" ||
   fail 'cancelled session lacked cancellation diagnostic'
 
-count="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "contract_schema=$schema" "$PG_TEST_DSN" \
-  -c 'SELECT count(*) FROM :"contract_schema".cancel_probe')" ||
-  fail 'rollback verification query failed'
+count="$(psql -X -qAt -v ON_ERROR_STOP=1 -v "contract_schema=$schema" "$PG_TEST_DSN" <<'SQL'
+SELECT count(*) FROM :"contract_schema".cancel_probe;
+SQL
+)" || fail 'rollback verification query failed'
 [[ "$count" == "0" ]] || fail "cancelled transaction committed data: $count"
 
 probe="$(psql -X -qAt -v ON_ERROR_STOP=1 "$PG_TEST_DSN" -c 'SELECT 1')" ||
