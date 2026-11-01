@@ -30,6 +30,9 @@ grep -Fq 'run_guest schema-plans tests/schema-plans.ores schema-positive' "$root
 grep -Fq 'run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive' "$root/scripts/verify-native-plans"
 grep -Fq 'Pure Oreslang adversarial schema contracts passed' "$root/tests/schema-adversarial.ores"
 grep -Fq 'tests/schema-adversarial.ores' "$root/scripts/verify-native-plans"
+grep -Fq 'run_guest combined-orm tests/orm-cross-backend.ores combined-positive' "$root/scripts/verify-native-plans"
+grep -Fq 'import module schema from' "$root/tests/orm-cross-backend.ores"
+grep -Fq 'import module pg from' "$root/tests/orm-cross-backend.ores"
 grep -Fq 'run_guest schema-invariants tests/schema-invariants.ores schema-invariants-positive' "$root/scripts/verify-native-plans"
 grep -Fq 'Pure Oreslang schema invariant and metamorphic contracts passed' "$root/tests/schema-invariants.ores"
 work="$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-harness-mock.XXXXXXXX")"
@@ -59,6 +62,9 @@ case "$1" in
       echo 'NOT_A_REAL_GUEST_RESULT'; exit 0
     fi
     echo 'Pure Oreslang adversarial schema contracts passed'; exit 0;;
+  tests/orm-cross-backend.ores)
+    if [[ "${MOCK_SKIP_COMBINED:-}" == yes ]]; then echo 'COMBINED_ORACLE_MISSING'; exit 0; fi
+    echo 'Pure Oreslang combined ORM portability contracts passed'; exit 0;;
   tests/negative/empty_identifier.ores)
     if [[ "${MOCK_SKIP_SENTINEL:-}" != yes ]]; then echo PG_NEGATIVE_EMPTY_IDENTIFIER_STARTED; fi
     if [[ "${MOCK_WRONG_DIAGNOSTIC:-}" == yes ]]; then
@@ -81,7 +87,7 @@ case "$1" in
 esac
 MOCK_GUEST
 chmod +x "$work/orm/scripts/ores" "$work/orm/scripts/verify-native-plans"
-for path in src/pg.ores src/schema.ores tests/plans.ores tests/schema-plans.ores tests/schema-adversarial.ores tests/schema-invariants.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
+for path in src/pg.ores src/schema.ores tests/plans.ores tests/schema-plans.ores tests/schema-adversarial.ores tests/schema-invariants.ores tests/orm-cross-backend.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
   echo 'MOCK PLACEHOLDER, NOT ORESLANG SOURCE' > "$work/orm/$path"
 done
 cat > "$work/bin/java" <<'MOCK_JAVA'
@@ -120,7 +126,7 @@ run_case() {
   set -e
   if [[ "$expectation" == pass ]]; then
     [[ "$rc" -eq 0 && "$(cut -f3 "$evidence/outcomes.tsv" | tail -n+2 | sort -u)" == PASS
-       && $(wc -l < "$evidence/outcomes.tsv") -eq 8
+       && $(wc -l < "$evidence/outcomes.tsv") -eq 9
        && "$(cat "$evidence/RESULT.txt")" == VERIFIED:* ]] ||
       { echo "MOCK HARNESS $scenario unexpected rejection (exit $rc)" >&2; cat "$output.stderr" >&2; exit 1; }
   else
@@ -133,6 +139,7 @@ run_case() {
   # Require failure to reach the intended guest oracle, not a premature
   # dirty-worktree/attestation failure that would hide a broken mock test.
   case "$scenario" in
+    missing-combined-guest) grep -Fq 'guest oracle failed for combined-orm' "$output.stderr" ;;
     bad-positive-stdout) grep -Fq 'guest oracle failed for schema-plans' "$output.stderr" ;;
     bad-positive-exit) grep -Fq 'guest oracle failed for schema-invariants' "$output.stderr" ;;
     launcher-exit-69) grep -Fq 'guest oracle failed for empty-identifier' "$output.stderr" ;;
@@ -142,6 +149,9 @@ run_case() {
   printf 'MOCK_HARNESS_CASE=%s EXPECTED=%s STATUS=PASS EXIT=%s\n' "$scenario" "$expectation" "$rc"
 }
 run_case normal-mocked-oracles pass
+export MOCK_SKIP_COMBINED=yes
+run_case missing-combined-guest reject
+unset MOCK_SKIP_COMBINED
 export MOCK_SKIP_SCHEMA_ADVERSARIAL=yes
 run_case missing-schema-adversarial-oracle reject
 unset MOCK_SKIP_SCHEMA_ADVERSARIAL
@@ -190,4 +200,4 @@ run_case negative-extra-stdout reject
 unset MOCK_NEGATIVE_EXTRA_STDOUT
 printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
 run_case dirty-worktree reject
-echo 'MOCK_HOST_GATE_SCENARIOS=17/17 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
+echo 'MOCK_HOST_GATE_SCENARIOS=18/18 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'
