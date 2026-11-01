@@ -12,6 +12,8 @@ on:
       - 'tests/pg17-catalog-readback-e2e.sql'
       - 'tests/pg17-catalog-readback-e2e.bash'
       - 'tests/pg17-migration-lock-e2e.bash'
+      - 'tests/pg17-migration-history-e2e.sql'
+      - 'tests/pg17-migration-history-e2e.bash'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg17-ddl-integration.yml'
   workflow_dispatch:
@@ -59,7 +61,8 @@ jobs:
             tests/pg17-rls-contract.bash \
             tests/pg17-cancel-transaction.bash \
             tests/pg17-catalog-readback-e2e.bash \
-            tests/pg17-migration-lock-e2e.bash
+            tests/pg17-migration-lock-e2e.bash \
+            tests/pg17-migration-history-e2e.bash
           do
             bash -n "$script"
             bash "$script"
