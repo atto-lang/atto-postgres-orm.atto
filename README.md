@@ -285,3 +285,18 @@ An opt-in disposable test in `tests/pg17-dml-contract.bash` validates two author
 ### Canonical NotSet admission (native guest not yet verified)
 
 All checked mutation paths revalidate the state and payload of public FieldChange instances. The temporary non-generic NotSet representation now requires an empty non-NULL text sentinel; explicit typed SQL NULL remains a separate Set state. Regression fixtures reject hidden boolean, hidden text and hidden NULL payloads. Host source guards run separately from unverified native compiler tests.
+
+## Pure Oreslang schema-first and DPM design (source only)
+
+A new runtime-neutral `src/orm_schema.ores` implements defensive catalog
+snapshots and **non-executing column-shape migration proposals** in pure
+Oreslang. It returns review/block decisions rather than SQL or live DDL.
+`tests/schema_diff.ores` contains 47 authored guest assertions awaiting
+compiler-backed execution. `contracts/typespec/document.tsp` and
+`contracts/json-schema/document-row.schema.json` are **independent authored
+contract peers**, not yet proven equivalent by the real TypeSpec compiler.
+`contracts/storage/document.storage.v1.json` separately represents database
+PK/tenant intent; PostgreSQL policy/constraints need full catalog review.
+[Schema-first design and DPM migration protocol](docs/SCHEMA_FIRST_MIGRATIONS.md).
+Production migration planning/application remains solely with DPM; ORM
+startup cannot execute DDL.

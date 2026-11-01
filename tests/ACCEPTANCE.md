@@ -330,3 +330,13 @@ The prepared-DML SQL-only contract has a corresponding host-only fail-closed moc
 ### New NotSet sentinel adversarial tests (NOT NATIVE VERIFIED)
 
 The Oreslang guest asserts canonical NotSet admission and rejection of hidden boolean/text/SQL NULL values, retaining valid Set and Unchanged semantics. Host guards verify revalidation in single-field UPDATE, multi-field UPDATE and INSERT. These authored tests are not yet a native guest result.
+
+## Pure Oreslang neutral catalog diff (not yet native-verified)
+
+`tests/schema_diff.ores` asserts schema snapshots, nullable additions,
+required-field backfill blocking, type and nullability drift, potential
+destructive drops/renames, duplicate names, invalid identifiers and kind
+families, bounded safety decisions, array copy isolation, and no claimed
+full-database parity. The TypeSpec/JSON Schema peers remain **not executed**
+in a compiler-backed parity lane. No migration has been produced or applied
+against a live database from this slice.
