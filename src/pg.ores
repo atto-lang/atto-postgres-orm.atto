@@ -368,12 +368,16 @@ define module pg as
   pub fnc snapshot_legacy_query(Query query): QueryPlan {
     return new QueryPlan(query.sql, query.params);
   }
-  pub fnc snapshot_legacy_query_borrowed(borrow Query query): QueryPlan {
+  // Borrow the parameter container directly: this keeps caller ownership and
+  // avoids requiring a projected borrow through a Query field.
+  pub fnc snapshot_query_params_borrowed(
+    string sql, borrow Array<string> params
+  ): QueryPlan {
     let Array<string> copy = arr[];
-    for (val param of query.params) {
+    for (val param of params) {
       copy.add(param);
     }
-    return new QueryPlan(query.sql, copy);
+    return new QueryPlan(sql, copy);
   }
   // Restricted table admission only. Workspace text is NOT tenant authority,
   // and Query.params is still actor-local mutable data, not an owned plan.
