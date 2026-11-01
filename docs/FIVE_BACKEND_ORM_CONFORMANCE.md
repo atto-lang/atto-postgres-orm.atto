@@ -37,8 +37,11 @@ to the same four actual ORM fixtures:
   operations and drift.
 - `tests/schema-invariants.ores`: deterministic, metamorphic and three-way
   snapshot checks.
+- `tests/orm-cross-backend.ores`: imports **both** modules in one guest,
+  validates a checked neutral schema, exact typed PostgreSQL DDL bytes,
+  and rejects injected SQL types and unsafe identifiers.
 
-There are **20 required backend/case outcomes** (5 × 4). The manifest is
+There are **25 required backend/case outcomes** (5 × 5). The manifest is
 always `NOT_VERIFIED` regardless of how many fixtures are authored.
 `scripts/verify-orm-five-backend-receipts.py` is a **local-only,
 stdlib-only receipt-shape validator**, not an Oreslang compiler:
