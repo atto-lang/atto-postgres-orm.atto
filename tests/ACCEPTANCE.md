@@ -286,7 +286,7 @@ The six-oracle scripts/verify-native-plans path now demands the existing Postgre
 `tests/schema-invariants.ores` adds 57 native Oreslang assertions on empty/ordered/reordered catalogs, creation/deletion inverse direction, manual stable-ID renames, name collisions, nullable add-vs-destructive reverse diff, deterministic nominal class previews, unsupported UUID/nullable types, malformed public descriptors, and deny-by-default review manifests. `scripts/verify-native-plans` now pins the seventh guest, fingerprints its exact source, compares stdout, and requires eight receipt rows including the header. The host mock harness adds missing-invariants-sentinel rejection and reports 12 mock scenarios. No native compiler or PostgreSQL evidence is claimed.
 
 
-## Eight additional fail-closed host/mock injection branches (draft verification)
+## Five additional fail-closed host/mock injection branches (draft verification)
 
 The seven-required-guest exact-head harness remains unchanged. The **mock**
 self-test suite grows from 12 to **17 scenarios**: successful fake baseline
