@@ -132,7 +132,7 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
                 def write_value(file, value):
                     file.write_text(json.dumps(value), encoding="utf-8")
                 with mock.patch.object(gate.subprocess, "check_output",
-                                       side_effect=[HEAD + "\n", ""] * 256):
+                                       side_effect=[HEAD + "\n", "", ""] * 256):
                     self.assertEqual(gate.verify_receipts(manifest, directory, HEAD), 25)
                     target = next(iter(originals))
                     original = originals[target]
@@ -185,6 +185,10 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
             with mock.patch.object(gate.subprocess, "check_output",
                                    side_effect=[HEAD + "\n", " M src/schema.ores\n"]):
                 with self.assertRaisesRegex(ValueError, "tracked files modified"):
+                    gate.verify_receipts(manifest, directory, HEAD)
+            with mock.patch.object(gate.subprocess, "check_output",
+                                   side_effect=[HEAD + "\n", "", "src/untracked.ores\n"]):
+                with self.assertRaisesRegex(ValueError, "untracked or ignored"):
                     gate.verify_receipts(manifest, directory, HEAD)
             with self.assertRaisesRegex(ValueError, "40-character"):
                 gate.verify_receipts(manifest, directory, "main")
