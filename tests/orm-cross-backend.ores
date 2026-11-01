@@ -1,0 +1,33 @@
+// Identical cross-toolchain Oreslang source. No host arithmetic replacement.
+// Must compile/import BOTH ORM modules and execute in the real backend guest.
+import module schema from '../src/schema';
+import module pg from '../src/pg';
+
+pub routine main(): void {
+  val neutral = schema.table_checked("docs", "docs", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("note", "note", "string", true)
+  ]);
+  if neutral.is_err() then panic("portable neutral schema rejected"); fi
+  val table = neutral.unwrap();
+  if table.columns().size != 2 then panic("portable schema column count changed"); fi
+
+  val ddl = pg.table_typed_pk("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("note", "text", true)
+  ], arr["id"]);
+  if ddl.is_err() then panic("portable typed PostgreSQL plan rejected"); fi
+  if ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  \"note\" text,\n  PRIMARY KEY (\"id\")\n)" then
+    panic("portable typed PostgreSQL DDL rendering drift");
+  fi
+
+  if schema.table_checked("docs", "docs", arr[
+    schema.column("id", "id", "arbitrary-sql", false)
+  ]).is_ok() then panic("neutral schema admitted SQL fragments"); fi
+  if pg.table_typed_pk("docs;DROP", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"]).is_ok() then panic("typed PostgreSQL identifier injection admitted"); fi
+
+  stdio.println("Pure Oreslang combined ORM portability contracts passed");
+  return;
+}
