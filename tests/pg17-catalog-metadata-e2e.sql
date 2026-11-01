@@ -25,7 +25,8 @@ CREATE POLICY tenant_guard ON guarded_records
   WITH CHECK (workspace_id = '00000000-0000-0000-0000-000000000001'::uuid);
 CREATE TEMP TABLE expected_policy ON COMMIT DROP AS
   SELECT pg_get_expr(polqual,polrelid) AS using_expr,
-         pg_get_expr(polwithcheck,polrelid) AS check_expr
+         pg_get_expr(polwithcheck,polrelid) AS check_expr,
+         polroles AS expected_roles
   FROM pg_catalog.pg_policy
   WHERE polrelid='guarded_records'::regclass AND polname='tenant_guard';
 CREATE TEMP TABLE expected_default ON COMMIT DROP AS
@@ -53,10 +54,12 @@ BEGIN
     JOIN pg_catalog.pg_class idx ON idx.oid=i.indexrelid
     WHERE i.indrelid='guarded_records'::regclass
       AND idx.relname='guarded_status_unique' AND i.indisunique AND i.indisvalid
-  ) OR NOT EXISTS (
+  ) OR (SELECT count(*) FROM pg_catalog.pg_policy
+        WHERE polrelid='guarded_records'::regclass) <> 1
+     OR NOT EXISTS (
     SELECT 1 FROM pg_catalog.pg_policy p CROSS JOIN expected_policy b
     WHERE p.polrelid='guarded_records'::regclass AND p.polname='tenant_guard'
-      AND p.polpermissive AND p.polcmd='*'
+      AND p.polpermissive AND p.polcmd='*' AND p.polroles=b.expected_roles
       AND pg_get_expr(p.polqual,p.polrelid) = b.using_expr
       AND pg_get_expr(p.polwithcheck,p.polrelid) = b.check_expr
   ) OR NOT EXISTS (
@@ -108,6 +111,22 @@ BEGIN
     ALTER POLICY tenant_guard ON guarded_records USING (true);
     PERFORM assert_protected_metadata();
     RAISE EXCEPTION 'POLICY_WEAKEN_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    ALTER POLICY tenant_guard ON guarded_records TO CURRENT_USER;
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'POLICY_ROLE_CHANGE_UNDETECTED';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
+    IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
+  END;
+  BEGIN
+    CREATE POLICY added_permissive_policy ON guarded_records USING (true);
+    PERFORM assert_protected_metadata();
+    RAISE EXCEPTION 'EXTRA_PERMISSIVE_POLICY_UNDETECTED';
   EXCEPTION WHEN check_violation THEN
     GET STACKED DIAGNOSTICS diagnostic = MESSAGE_TEXT;
     IF diagnostic <> 'PROTECTED_CATALOG_DRIFT' THEN RAISE; END IF;
