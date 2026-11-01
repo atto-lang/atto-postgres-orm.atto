@@ -15,6 +15,8 @@ on:
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/pg17-*.bash'
+      - 'tests/pg17-*.sql'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   push:
@@ -34,6 +36,8 @@ on:
       - 'tests/verify-launcher-host.bash'
       - 'tests/verify-native-plans-host.bash'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/pg17-*.bash'
+      - 'tests/pg17-*.sql'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg-host-verifier.yml'
   workflow_dispatch:
@@ -58,7 +62,8 @@ jobs:
           bash -n tests/verify-native-plans-host.bash
           bash -n tests/pg17-ddl-contract.bash
           bash -n tests/verify-pg17-ddl-host.bash
-      - name: Host-only failure-injection suites (10 verifier, 11 launcher, 10 SQL mocks)
+          for script in tests/pg17-*.bash; do bash -n "$script"; done
+      - name: Host-only fail-closed mock suites (not native or live SQL)
         shell: bash
         run: |
           set -euo pipefail
