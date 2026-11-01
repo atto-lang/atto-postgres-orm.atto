@@ -175,6 +175,73 @@ pub routine main(): void {
     panic("public-constructor forged identifier entered source descriptor");
   fi
 
+
+  // Complete portable catalog changes retain per-table stable IDs.
+  val current_cat_result = schema.catalog_checked(arr[current_table]);
+  val wanted_cat_result = schema.catalog_checked(arr[wanted_table]);
+  if current_cat_result.is_err() || wanted_cat_result.is_err() then
+    panic("valid whole catalog rejected");
+  fi
+  val current_cat = current_cat_result.unwrap();
+  val wanted_cat = wanted_cat_result.unwrap();
+  val combined = schema.diff_catalog_checked(rt borrow wanted_cat, rt borrow current_cat);
+  if combined.is_err() || combined.unwrap().step_count() != 4 then
+    panic("whole catalog failed to preserve per-table diff");
+  fi
+  val equal_cat = schema.diff_catalog_checked(rt borrow current_cat, rt borrow current_cat);
+  if equal_cat.is_err() || equal_cat.unwrap().step_count() != 0 then
+    panic("equal whole catalogs produced drift");
+  fi
+  if !schema.catalog_checked(arr[current_table, current_table]).is_err() then
+    panic("duplicate stable table ID admitted");
+  fi
+  val duplicate_name = new SchemaTable("different", "users", arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  if !schema.catalog_checked(arr[current_table, duplicate_name]).is_err() then
+    panic("duplicate physical table name admitted");
+  fi
+  val added_cat_result = schema.catalog_checked(arr[current_table, labels]);
+  if added_cat_result.is_err() then panic("extra table catalog rejected"); fi
+  val added_cat = added_cat_result.unwrap();
+  val created = schema.diff_catalog_checked(rt borrow added_cat, rt borrow current_cat);
+  if created.is_err() || created.unwrap().step_count() != 1 then
+    panic("new table missing from catalog plan");
+  fi
+  if created.unwrap().step_at(0).unwrap().op != "review_create_table" ||
+    created.unwrap().step_at(0).unwrap().risk != "manual" then
+    panic("new table silently authorized");
+  fi
+  val dropped = schema.diff_catalog_checked(rt borrow current_cat, rt borrow added_cat);
+  if dropped.is_err() || dropped.unwrap().step_count() != 1 then
+    panic("removed table missing from catalog plan");
+  fi
+  if dropped.unwrap().step_at(0).unwrap().op != "review_drop_table" ||
+    dropped.unwrap().step_at(0).unwrap().risk != "destructive" then
+    panic("table drop silently authorized");
+  fi
+  val conflicting_cat_result = schema.catalog_checked(arr[duplicate_name]);
+  if conflicting_cat_result.is_err() then panic("valid alternate stable ID fixture rejected"); fi
+  val conflicting_cat = conflicting_cat_result.unwrap();
+  if !schema.diff_catalog_checked(rt borrow conflicting_cat, rt borrow current_cat).is_err() then
+    panic("same physical name different stable table IDs accepted");
+  fi
+  val forged_cat = new SchemaCatalog(arr[
+    new SchemaTable("users", "bad;drop", arr[
+      schema.column("id","id","uuid",false)
+    ])
+  ]);
+  if !schema.diff_catalog_checked(rt borrow forged_cat, rt borrow current_cat).is_err() then
+    panic("forged public catalog admitted");
+  fi
+  let mut Array<SchemaTable> table_inputs = arr[current_table];
+  val saved_cat = schema.catalog_checked(table_inputs);
+  if saved_cat.is_err() then panic("snapshot catalog fixture rejected"); fi
+  table_inputs.add(labels);
+  if saved_cat.unwrap().tables().size != 1 then
+    panic("post-admission array mutation modified catalog");
+  fi
+
   stdio.println("Pure Oreslang schema-diff planning contracts passed");
   return;
 }

@@ -104,5 +104,29 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn("public-constructor forged identifier entered codegen", guest)
 
 
+    def test_full_catalog_guest_contract_source_only(self):
+        """Host source-presence check, not a native Oreslang or DPM test."""
+        source = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/schema-plans.ores").read_text(encoding="utf-8")
+        for marker in (
+            "pub define class SchemaCatalog as",
+            "pub fnc catalog_checked(",
+            "pub fnc diff_catalog_checked(",
+            "if tables.size > 256 then",
+            "duplicate catalog table stable identity",
+            "duplicate catalog physical table name",
+            "physical table name conflicts with stable identity",
+            '"review_create_table"',
+            '"review_drop_table"',
+        ):
+            self.assertIn(marker, source)
+        for marker in (
+            "forged public catalog admitted",
+            "table drop silently authorized",
+            "post-admission array mutation modified catalog",
+        ):
+            self.assertIn(marker, guest)
+
+
 if __name__ == "__main__":
     unittest.main()

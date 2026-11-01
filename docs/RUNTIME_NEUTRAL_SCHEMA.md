@@ -127,3 +127,23 @@ No runtime ORM or user-supplied string can bless a source preview.
 negative tests for wrong type mapping, nullable loss, prefix-length
 overflow, and forged public table objects. These are authored guest
 assertions until a pinned Oreslang compiler runs them.
+
+
+## Whole-catalog stable-ID reconciliation (stage 3; guest not executed)
+
+\`SchemaCatalog\` holds an array-copied snapshot of up to 256 validated
+tables (the peer Catalog TypeSpec/JSON Schema maximum). The pure
+\`schema.catalog_checked\` rejects duplicate stable IDs, duplicate physical
+table names and malformed directly-constructed tables.
+\`schema.diff_catalog_checked\` preserves ordered per-table diffs and
+classifies new tables as \`review_create_table/manual\`, removed tables as
+\`review_drop_table/destructive\`, and same-physical-name/different-stable-ID
+as an error. A matching stable ID with a changed physical name still yields
+a manual rename-review step, never an inferred migration.
+
+This is deliberately a subset of the full DPM catalog: constraints, RLS,
+grants and indexes do not disappear merely because the portable projection
+cannot represent them. Both planners emit proposals only. Tests for
+duplicate/colliding table IDs, create/drop, forged public catalogs and
+array-copy isolation are authored in \`tests/schema-plans.ores\`; they still
+require a real Oreslang guest run.
