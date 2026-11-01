@@ -86,6 +86,16 @@ mandatory primary-key tie-breaking, and fixed page sizes (1, 10, 25,
 fields and invalid tenant UUID strings. This API emits SQL/binds only;
 neither tenant authorization nor a PostgreSQL connection is implemented.
 
+## Strict typed single-row INSERT (native source; execution pending)
+
+`plan_schema_insert_checked` accepts at most 8 named changes plus explicit
+workspace and id UUIDs. Unknown/duplicate names, wrong types, invalid
+SQL NULL for required fields, missing nonnullable values, `Unchanged`
+and caller attempts to override tenant/id are rejected. Nullable fields
+can be omitted; no column defaults are assumed. A `TypedInsertPlan`
+snapshots binds, and the SQL uses explicit placeholders and RETURNING id.
+This remains unexecuted guest source without a PostgreSQL driver.
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and

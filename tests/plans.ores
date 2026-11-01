@@ -591,6 +591,57 @@ pub routine main(): void {
   if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
     arr["id"], "title", pg.db_text("x"), "spoofed-workspace", "id",
     false, 10).is_err() then panic("unvalidated workspace admitted"); fi
+
+  val inserted = pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("text'; DROP TABLE docs;--"))),
+    pg.field_patch("note", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b);
+  if inserted.is_err() then panic("typed insert rejected"); fi
+  if inserted.unwrap().sql !=
+    "INSERT INTO \"docs\" (\"workspace_id\", \"id\", \"title\", \"note\") VALUES ($1::uuid, $2::uuid, $3::text, $4::text) RETURNING \"id\"" then
+    panic("typed INSERT SQL mismatch");
+  fi
+  if inserted.unwrap().param_count() != 4 then panic("typed INSERT bind count"); fi
+  if inserted.unwrap().param_at(2).unwrap().text_value != "text'; DROP TABLE docs;--" then
+    panic("INSERT value interpolation");
+  fi
+  if !inserted.unwrap().param_at(3).unwrap().is_null then panic("INSERT NULL lost"); fi
+  val omitted_nullable = pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("ok"))),
+    pg.field_patch("note", pg.change_not_set())
+  ], uuid_a, uuid_b);
+  if omitted_nullable.is_err() then panic("optional INSERT NotSet rejected"); fi
+  if omitted_nullable.unwrap().param_count() != 3 then panic("NotSet added INSERT bind"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[], uuid_a, uuid_b).is_err() then
+    panic("missing nonnullable field admitted");
+  fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("NotSet required field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_unchanged(pg.db_text("old")))
+  ], uuid_a, uuid_b).is_err() then panic("Unchanged INSERT field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("nonnullable INSERT NULL admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_boolean(true)))
+  ], uuid_a, uuid_b).is_err() then panic("wrong INSERT type admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("title", pg.change_set(pg.db_text("x")))
+  ], uuid_a, uuid_b).is_err() then panic("duplicate INSERT column admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("workspace_id", pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("insert tenant override admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("secret", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("unknown INSERT field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x")))
+  ], "wrong-workspace", uuid_b).is_err() then panic("invalid INSERT workspace admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }

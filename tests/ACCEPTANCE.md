@@ -254,3 +254,5 @@ second value bind, impossible NULL on nonnullable columns, deterministic
 primary-key ORDER BY tie-breaking, strict finite LIMIT admission and
 rejection of an unvalidated workspace ID. These are source-authored
 assertions, not executed SQL or evidence of RLS.
+
+New unexecuted INSERT guest cases cover required-field admission, NotSet versus SQL NULL, type and duplicate errors, tenant/id spoof prevention at the SQL planner boundary, bind ordering and injection separation. No database integration or authenticated tenant authority exists.

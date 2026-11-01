@@ -203,6 +203,26 @@ pub define class TypedSelectPlan as
   }
 end
 
+// Immutable-in-practice actor-local insert-plan facade. Driver execution
+// is not provided and public constructors confer no SQL execution rights.
+pub define class TypedInsertPlan as
+  pub val string sql;
+  val Array<DbValue> saved_values;
+  pub constructor(string sql, Array<DbValue> values) {
+    self.sql = sql;
+    let Array<DbValue> copy = arr[];
+    for (val value of values) { copy.add(value); }
+    self.saved_values = copy;
+  }
+  pub param_count(): int { return self.saved_values.size; }
+  pub param_at(int index): Result<DbValue, string> {
+    if index < 0 || index >= self.saved_values.size then
+      return Err("typed insert parameter index out of bounds");
+    fi
+    return Ok(self.saved_values.get(index));
+  }
+end
+
 define module pg as
   // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
   // This is NOT full UTF-8 byte-length validation; legacy SQL methods
@@ -852,5 +872,82 @@ define module pg as
       + " WHERE workspace_id = $1::uuid AND " + predicate
       + " ORDER BY " + ordering + " LIMIT " + limit_sql;
     return Ok(new TypedSelectPlan(sql, binds));
+  }
+  // SQL-only, typed single-row insert. Defaults are not yet modelled: every
+  // required field needs a checked Set, and the two required UUID keys always
+  // come from explicit parameters. No authenticated tenant claim.
+  pub fnc plan_schema_insert_checked(
+    PgTableDescriptor descriptor, Array<PgFieldPatch> inserts,
+    string workspace, string id
+  ): Result<TypedInsertPlan, string> {
+    val columns = descriptor.columns();
+    if table_descriptor_checked(descriptor.name, columns).is_err() then
+      return Err("invalid schema descriptor");
+    fi
+    if inserts.size > 8 then return Err("too many insert fields"); fi
+    if !canonical_uuid(workspace) || !canonical_uuid(id) then
+      return Err("invalid insert UUID");
+    fi
+    val tenant = db_uuid_checked(workspace);
+    val record = db_uuid_checked(id);
+    if tenant.is_err() then return Err("invalid tenant bind"); fi
+    if record.is_err() then return Err("invalid record bind"); fi
+    let Array<DbValue> binds = arr[tenant.unwrap(), record.unwrap()];
+    let Array<string> seen = arr[];
+    let string column_sql = ident("workspace_id") + ", " + ident("id");
+    let string value_sql = "$1::uuid, $2::uuid";
+    val slots = arr["$1", "$2", "$3", "$4", "$5", "$6", "$7", "$8", "$9", "$10"];
+    for (val entry of inserts) {
+      if !admitted_identifier(entry.name) then return Err("invalid insert column"); fi
+      for (val earlier of seen) {
+        if earlier == entry.name then return Err("duplicate insert column"); fi
+      }
+      seen.add(entry.name);
+      if entry.name == "id" || entry.name == "workspace_id" then
+        return Err("key columns have dedicated binds");
+      fi
+      let bool declared = false;
+      let ColumnSpec field = new ColumnSpec("invalid", "text", false);
+      for (val spec of columns) {
+        if spec.name == entry.name then
+          field = spec;
+          declared = true;
+        fi
+      }
+      if !declared then return Err("insert field not declared"); fi
+      if entry.change.state != "set" && entry.change.state != "not_set" then
+        return Err("invalid insert field change state");
+      fi
+      if !admitted_db_value(entry.change.value) then
+        return Err("invalid typed insert value");
+      fi
+      if entry.change.state == "not_set" then
+        if !field.nullable then return Err("missing required insert value"); fi
+      else
+        if entry.change.value.kind != field.kind then
+          return Err("insert bind type mismatch");
+        fi
+        if entry.change.value.is_null && !field.nullable then
+          return Err("nonnullable insert SQL NULL");
+        fi
+        column_sql = column_sql + ", " + ident(entry.name);
+        value_sql = value_sql + ", " + slots.get(binds.size) + "::" + field.kind;
+        binds.add(entry.change.value);
+      fi
+    }
+    for (val field of columns) {
+      if field.name != "id" && field.name != "workspace_id" && !field.nullable then
+        let bool supplied = false;
+        for (val entry of inserts) {
+          if entry.name == field.name && entry.change.state == "set" then
+            supplied = true;
+          fi
+        }
+        if !supplied then return Err("required insert field missing"); fi
+      fi
+    }
+    val sql = "INSERT INTO " + ident(descriptor.name) + " (" + column_sql
+      + ") VALUES (" + value_sql + ") RETURNING " + ident("id");
+    return Ok(new TypedInsertPlan(sql, binds));
   }
 end
