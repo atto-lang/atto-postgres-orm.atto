@@ -277,3 +277,7 @@ server, native Oreslang compiler or real driver was executed locally**, and a
 zero-step GitHub job cannot count as execution. This SQL-only test does not
 authenticate tenants or establish RLS, migrations, driver correctness, or
 cross-backend parity.
+
+### PostgreSQL 17 prepared DML SQL-only gate
+
+An opt-in disposable test in `tests/pg17-dml-contract.bash` validates two authored Oreslang SQL plan goldens, then uses real PostgreSQL PREPARE/EXECUTE with typed UUID/text binds, explicit SQL NULL, and rollback. `tests/verify-pg17-dml-host.bash` provides **10 host-only admission/mocking cases**, separately from real PostgreSQL. It does **not** run the Oreslang compiler, wire driver, actor transactions or authenticated tenant RLS.

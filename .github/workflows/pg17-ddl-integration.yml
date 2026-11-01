@@ -5,6 +5,7 @@ on:
       - 'src/pg.ores'
       - 'tests/plans.ores'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/verify-pg17-dml-host.bash'
       - 'tests/pg17-dml-contract.bash'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg17-ddl-integration.yml'
