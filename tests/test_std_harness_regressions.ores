@@ -31,13 +31,25 @@ fnc nullable_column_omits_not_null(): TestOutcome {
     "nullable column must not include NOT NULL constraint");
 }
 
+fnc dotted_identifier_is_always_quoted(): TestOutcome {
+  return expect_equal_string(pg.ident("account.events"), "\"account.events\"",
+    "dots must remain within one quoted SQL identifier");
+}
+
+fnc injected_sql_type_token_is_rejected(): TestOutcome {
+  return expect_true(pg.column("id", "text); DROP TABLE logs; --", true).is_err(),
+    "type-token injection must not enter generated DDL");
+}
+
 pub routine main(): void {
   val TestSuite suite = new TestSuite("postgres-orm", arr[
     new TestCase("quoted_identifier_escapes_quotes", quoted_identifier_escapes_quotes, false, ""),
     new TestCase("unsupported_type_is_rejected", unsupported_type_is_rejected, false, ""),
     new TestCase("query_values_remain_separate_from_sql", query_values_remain_separate_from_sql, false, ""),
     new TestCase("not_null_column_is_explicit", not_null_column_is_explicit, false, ""),
-    new TestCase("nullable_column_omits_not_null", nullable_column_omits_not_null, false, "")
+    new TestCase("nullable_column_omits_not_null", nullable_column_omits_not_null, false, ""),
+    new TestCase("dotted_identifier_is_always_quoted", dotted_identifier_is_always_quoted, false, ""),
+    new TestCase("injected_sql_type_token_is_rejected", injected_sql_type_token_is_rejected, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
