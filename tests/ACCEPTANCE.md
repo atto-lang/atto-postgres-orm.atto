@@ -577,3 +577,51 @@ Actions admission / authorization on the source organization, followed
 by an actual stepful, exact-head source-local host Python suite,
 PG17 disposable-service workflow, and pinned native guest verifier
 (in that order). Keep PR draft; no production DB or `main` changed.
+
+
+## 2026-11-01 five-backend source admission and dual ORM module test
+
+Added `contracts/orm-five-backend-gate.v1.json` and
+`scripts/verify-orm-five-backend-receipts.py`. The contract enumerates
+**Java, LLVM, Wasm, Cranelift and .NET** and requires **5 Oreslang suites
+per toolchain = 25 required guest executions**. Its status is permanently
+`NOT_VERIFIED` until independent executable evidence is reviewed. The
+receipt checker enforces strict JSON keys, 40-hex reviewed Git HEAD,
+clean local checkout, exact fixture SHA-256, both `src/schema.ores` and
+`src/pg.ores` SHA-256, consistent compiler/runner SHA-256 lineage across
+cases, source-import edges, guest success sentinel, non-skipped zero-exit
+compilation/guest, and exact stdout. It does not launch a compiler and
+does not certify the honesty of an author-supplied receipt.
+
+New `tests/orm-cross-backend.ores` imports both ORM modules in the
+same native guest process. It checks a neutral schema and byte-exact
+typed PostgreSQL CREATE TABLE rendering and rejects an unadmitted
+logical type and SQL-injectable table name. The pinned Java
+`scripts/verify-native-plans` now runs this guest as an **eighth**
+distinct oracle and rejects incomplete/misordered outcomes. Its
+host-only fake-compiler harness now authors an **18th negative scenario**
+for a missing combined-guest sentinel.
+
+New `tests/test_orm_five_backend_gate.py` authors five Python
+host-only methods including 25 synthetic receipt shapes, mutated backend
+identity, module hashes, compiler lineage, wrong output, skip, mock,
+unsigned/boolean exit, duplicate JSON keys, dropped module imports and
+forged guest success. The parent PR's source-only Rust migration suite
+has been reconciled into this branch and extended with two independent
+Rust guards for the 25-case matrix. The host-only CI workflow registers
+both tests and still prints a literal NOT_VERIFIED receipt-preflight
+message. These checks are **not backend execution**, and the Python
+suite still requires coverage-preserving Rust migration under the repo's
+tooling policy.
+
+The full ORM **is not yet executable on all five toolchains**.
+Cranelift currently has only a scalar-expression frontend, not the
+classes, Array/Result, imports and borrow semantics used by the ORM.
+LLVM, Wasm and .NET must each compile the exact unmodified Oreslang
+source and produce real guest receipts; Wasm may use the LLVM frontend
+but still requires independent Wasm runtime execution. No Oreslang
+guest, native compiler, PostgreSQL connection or database migration
+has been executed as evidence by these new source-only checks.
+Source GitHub Actions admission remains blocked, and the separate P0
+private-source export hold prevents cross-organization mirroring.
+Keep this PR draft. No main or production database changes.
