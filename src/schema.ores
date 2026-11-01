@@ -266,22 +266,21 @@ define module schema as
     let mut Array<SchemaStep> steps = arr[];
     for (val wanted of desired_tables) {
       let bool matched = false;
-      let SchemaTable existing_match = new SchemaTable("placeholder", "placeholder", arr[]);
       for (val existing of actual_tables) {
         if existing.stable_id == wanted.stable_id then
           matched = true;
-          existing_match = existing;
+          // No disposable placeholder object or shared mutable match slot:
+          // diff directly from the validated, actor-local snapshot.
+          val inner = diff_checked(rt borrow wanted, rt borrow existing);
+          if inner.is_err() then return Err("table diff failed at catalog trust boundary"); fi
+          for (val change of inner.unwrap().steps()) { steps.add(change); }
         else
           if existing.name == wanted.name then
             return Err("physical table name conflicts with stable identity");
           fi
         fi
       }
-      if matched then
-        val inner = diff_checked(rt borrow wanted, rt borrow existing_match);
-        if inner.is_err() then return Err("table diff failed at catalog trust boundary"); fi
-        for (val change of inner.unwrap().steps()) { steps.add(change); }
-      else
+      if !matched then
         // Missing constraints, policies and role grants force human review.
         steps.add(new SchemaStep("review_create_table", wanted.stable_id, "", "manual"));
       fi
