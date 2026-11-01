@@ -462,6 +462,75 @@ pub routine main(): void {
     panic("Sync frame mismatch");
   fi
 
+  // PostgreSQL backend framing and strict UTF-8 decode.
+  val auth_frame = pg.wire_backend_frame_checked([82, 0, 0, 0, 8, 0, 0, 0, 0]);
+  if auth_frame.is_err() then panic("AuthenticationOk frame rejected"); fi
+  val auth_code = pg.wire_authentication_code(auth_frame.unwrap());
+  if auth_code.is_err() || auth_code.unwrap() != 0 then panic("AuthenticationOk code mismatch"); fi
+
+  val key_frame = pg.wire_backend_frame_checked([
+    75, 0, 0, 0, 12,
+    0, 0, 0, 123,
+    0, 0, 1, 200
+  ]);
+  if key_frame.is_err() then panic("BackendKeyData frame rejected"); fi
+  val key_data = pg.wire_backend_key_data(key_frame.unwrap());
+  if key_data.is_err()
+    || key_data.unwrap().process_id != 123
+    || key_data.unwrap().secret_key != 456 then
+    panic("BackendKeyData decode mismatch");
+  fi
+
+  val ready_frame = pg.wire_backend_frame_checked([90, 0, 0, 0, 5, 73]);
+  if ready_frame.is_err() then panic("ReadyForQuery frame rejected"); fi
+  val ready_status = pg.wire_ready_status(ready_frame.unwrap());
+  if ready_status.is_err() || ready_status.unwrap() != "I" then
+    panic("ReadyForQuery status mismatch");
+  fi
+
+  val error_frame = pg.wire_backend_frame_checked([
+    69, 0, 0, 0, 38,
+    83, 69, 82, 82, 79, 82, 0,
+    67, 52, 50, 53, 48, 49, 0,
+    77, 112, 101, 114, 109, 105, 115, 115, 105, 111, 110, 32,
+    100, 101, 110, 105, 101, 100, 0,
+    0
+  ]);
+  if error_frame.is_err() then panic("ErrorResponse frame rejected"); fi
+  val backend_error = pg.wire_error_response_checked(error_frame.unwrap());
+  if backend_error.is_err()
+    || backend_error.unwrap().sqlstate != "42501"
+    || backend_error.unwrap().message != "permission denied" then
+    panic("ErrorResponse SQLSTATE/message mismatch");
+  fi
+
+  val row_frame = pg.wire_backend_frame_checked([
+    68, 0, 0, 0, 19,
+    0, 2,
+    0, 0, 0, 5, 104, 101, 108, 108, 111,
+    255, 255, 255, 255
+  ]);
+  if row_frame.is_err() then panic("DataRow frame rejected"); fi
+  val row = pg.wire_data_row_checked(row_frame.unwrap());
+  if row.is_err() then panic("DataRow decode rejected"); fi
+  if row.unwrap().column_count() != 2
+    || row.unwrap().is_null(0)
+    || !row.unwrap().is_null(1)
+    || row.unwrap().value_at(0).unwrap() != "hello"
+    || !row.unwrap().value_at(1).is_err() then
+    panic("DataRow text/NULL decode mismatch");
+  fi
+
+  if !pg.wire_backend_frame_checked([90, 0, 0, 0, 5]).is_err() then
+    panic("truncated backend frame admitted");
+  fi
+  if !pg.wire_backend_frame_checked([90, 0, 0, 0, 5, 73, 0]).is_err() then
+    panic("trailing backend frame byte admitted");
+  fi
+  if !pg.wire_backend_frame_checked([90, 0, 0, 0, 3]).is_err() then
+    panic("backend frame length below protocol minimum admitted");
+  fi
+
   // Actor-owned connection lease / transaction fencing contract.
   val acquired_lease = pg.acquire_connection_checked(
     "conn_1", "actor-A", 3, 7, "tenant_a");
