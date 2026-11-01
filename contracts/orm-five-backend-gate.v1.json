@@ -41,6 +41,11 @@
       "id": "invariant-schema",
       "source": "tests/schema-invariants.ores",
       "expected_stdout": "Pure Oreslang schema invariant and metamorphic contracts passed\n"
+    },
+    {
+      "id": "combined-orm-modules",
+      "source": "tests/orm-cross-backend.ores",
+      "expected_stdout": "Pure Oreslang combined ORM portability contracts passed\n"
     }
   ],
   "requirements": [
@@ -49,7 +54,7 @@
     "guest must execute, not be skipped, mocked or host-language reimplemented",
     "compiler and runner and produced guest artifact SHA256 hashes recorded",
     "exact source SHA256, backend HEAD, exit code and stdout recorded",
-    "all 20 backend/case results must pass before full ORM planner parity"
+    "all 25 backend/case results must pass before full ORM planner parity"
   ],
   "known_limitations": {
     "java": "Pinned JDK25 guest harness authored; no exact-head stepful execution for this ORM PR",
