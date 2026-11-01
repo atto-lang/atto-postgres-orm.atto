@@ -451,11 +451,15 @@ expressions before applying a nullable-column addition. It requires that
 `pg_class`, `pg_policy`, `pg_constraint`, `pg_index`, and `pg_attrdef`
 continue to match the reviewed baseline after the addition.
 
-Nine mutation cases must fail with SQLSTATE 23514 **and the exact**
+Thirteen mutation cases must fail with SQLSTATE 23514 **and the exact**
 `PROTECTED_CATALOG_DRIFT` diagnostic: RLS disable, FORCE RLS removal,
 policy removal, policy weakening, policy role-scope changes, injection of
 an additional permissive policy, unique-index drop, check-constraint
-drop, and column-default change. PL/pgSQL exception subtransactions
+drop, and column-default change. The extra four cases replace a same-name
+unique index, CHECK constraint, and primary key with weaker definitions and
+inject an unreviewed index. The fixture now fingerprints the full
+`pg_get_indexdef` and `pg_get_constraintdef` text and requires an exact
+index/constraint inventory, rather than trusting object names alone. PL/pgSQL exception subtransactions
 roll back the hostile mutations, and the outer transaction always
 `ROLLBACK`s. The final query must show that the temporary schema
 did not survive. This covers selected catalog objects; grants,
@@ -488,3 +492,36 @@ allocation (`runner_id=0`, `steps=[]`); 41280290489 contained
 zero jobs. The private-source cross-org export hold from security
 issue #22 remains in force. Keep PR draft; no production database
 or source `main` was changed.
+
+
+## Actions admission and supply-chain guard (security hold #22)
+
+`.github/workflows/orm-schema-contract.yml` now uses SHA-pinned
+`actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683`
+(v4.2.2) and
+`actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065`
+(v5.6.0), verified against the action repositories' Git tag refs. Checkout
+uses `persist-credentials: false`. The workflow now runs Python test-file
+compilation and a `bash -n` syntax loop across all PG17 E2E shells before
+host-only unit tests. `pg-host-verifier.yml` also watches the new PG17
+fixtures and syntax-checks them, with old static scenario counts removed
+from the job description.
+
+`tests/test_workflow_security.py` adds source-only regression checks for
+full-length action pins, disabled checkout credential persistence,
+read-only token scopes, no privileged trigger such as
+`pull_request_target`, discovery of both host test modules, registration
+of every PG17 SQL-only gate, and zero source checkout in the source-free
+runner-admission canary. The host tests cannot certify current GitHub
+runner billing or eligibility; they should not be considered executed in
+source Actions when the job has no steps.
+
+**Security hold:** `oreslang-platform-conformance` issue #22 remains
+open, explicitly disallows private-source export to another GitHub
+organization, and requires independent review of earlier exposure.
+Transferring a Git tree via API without secrets is still a prohibited
+private-source transfer. No alternate-org repository was written or
+mirrored during this hardening work. The Actions admission reason is still
+unknown (issue `oreslang-source.java` #963); an owner must check
+billing, eligibility, private Actions policy and runner groups before
+claiming lack of minutes.
