@@ -130,6 +130,15 @@ run_case() {
         { echo "MOCK HARNESS $scenario failed without negative receipt" >&2; exit 1; }
     fi
   fi
+  # Require failure to reach the intended guest oracle, not a premature
+  # dirty-worktree/attestation failure that would hide a broken mock test.
+  case "$scenario" in
+    bad-positive-stdout) grep -Fq 'guest oracle failed for schema-plans' "$output.stderr" ;;
+    bad-positive-exit) grep -Fq 'guest oracle failed for schema-invariants' "$output.stderr" ;;
+    launcher-exit-69) grep -Fq 'guest oracle failed for empty-identifier' "$output.stderr" ;;
+    negative-zero-exit) grep -Fq 'guest oracle failed for control-identifier' "$output.stderr" ;;
+    negative-extra-stdout) grep -Fq 'guest oracle failed for empty-table' "$output.stderr" ;;
+  esac
   printf 'MOCK_HARNESS_CASE=%s EXPECTED=%s STATUS=PASS EXIT=%s\n' "$scenario" "$expectation" "$rc"
 }
 run_case normal-mocked-oracles pass
@@ -164,8 +173,6 @@ mkdir -p "$work/compiler/src"
 printf 'IGNORED MOCK COMPILER INPUT\n' > "$work/compiler/src/ignored-compiler.java"
 run_case ignored-compiler-input reject
 rm "$work/compiler/src/ignored-compiler.java"
-printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
-run_case dirty-worktree reject
 export MOCK_BAD_POSITIVE_STDOUT=yes
 run_case bad-positive-stdout reject
 unset MOCK_BAD_POSITIVE_STDOUT
@@ -181,4 +188,6 @@ unset MOCK_NEGATIVE_ZERO_EXIT
 export MOCK_NEGATIVE_EXTRA_STDOUT=yes
 run_case negative-extra-stdout reject
 unset MOCK_NEGATIVE_EXTRA_STDOUT
+printf '\nDIRTY\n' >> "$work/orm/src/pg.ores"
+run_case dirty-worktree reject
 echo 'MOCK_HOST_GATE_SCENARIOS=17/17 PASS (NOT ORESLANG OR POSTGRESQL EXECUTION)'

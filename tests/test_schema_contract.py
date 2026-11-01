@@ -531,6 +531,15 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn('cmp -s "$evidence/$label.expected-stdout"', verifier)
         self.assertIn('"$rc" -ne 69', verifier)
         self.assertIn('"$rc" -ne 0', verifier)
+        # A negative test must fail for the *expected oracle*, not because
+        # the mock checkout was left dirty by an earlier failure case.
+        self.assertLess(harness.index("run_case bad-positive-stdout reject"),
+                        harness.index("run_case dirty-worktree reject"))
+        self.assertIn("guest oracle failed for schema-plans", harness)
+        self.assertIn("guest oracle failed for schema-invariants", harness)
+        self.assertIn("guest oracle failed for empty-identifier", harness)
+        self.assertIn("guest oracle failed for control-identifier", harness)
+        self.assertIn("guest oracle failed for empty-table", harness)
 
     def test_three_way_oracle_in_seventh_guest(self):
         """Presence-only: Oreslang execution remains a separate release gate."""
