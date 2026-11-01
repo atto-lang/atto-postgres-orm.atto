@@ -107,6 +107,47 @@ pub routine main(): void {
   if !schema.review_manifest_preview_checked(rt borrow forged_op).is_err() then panic("executable SQL op forged into review"); fi
   val forged_scope = new SchemaPlan(arr[new SchemaStep("review_create_table","alpha","key","manual")]);
   if !schema.review_manifest_preview_checked(rt borrow forged_scope).is_err() then panic("table operation admitted column ID"); fi
+  // Pure Oreslang checked risk diagnostics: cannot grant SQL authority.
+  val safe_plan = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha","optional","safe"),
+    new SchemaStep("drop_not_null","alpha","state","safe")
+  ]);
+  val safe_summary = schema.risk_summary_checked(rt borrow safe_plan);
+  if safe_summary.is_err() then panic("safe risk summary rejected"); fi
+  if safe_summary.unwrap().safe_count != 2 then panic("safe risk count wrong"); fi
+  if safe_summary.unwrap().preflight_count != 0 then panic("safe summary includes preflight"); fi
+  if safe_summary.unwrap().manual_count != 0 then panic("safe summary includes manual"); fi
+  if safe_summary.unwrap().destructive_count != 0 then panic("safe summary includes destructive"); fi
+  if safe_plan.has_blockers() then panic("valid safe step incorrectly marked blocking"); fi
+  val mixed_risks = new SchemaPlan(arr[
+    new SchemaStep("drop_not_null","alpha","key","safe"),
+    new SchemaStep("set_not_null","alpha","state","preflight"),
+    new SchemaStep("review_create_table","beta","","manual"),
+    new SchemaStep("drop_column","alpha","key","destructive")
+  ]);
+  val mixed_summary = schema.risk_summary_checked(rt borrow mixed_risks);
+  if mixed_summary.is_err() then panic("mixed risk summary rejected"); fi
+  if mixed_summary.unwrap().safe_count != 1 then panic("mixed safe count wrong"); fi
+  if mixed_summary.unwrap().preflight_count != 1 then panic("mixed preflight count wrong"); fi
+  if mixed_summary.unwrap().manual_count != 1 then panic("mixed manual count wrong"); fi
+  if mixed_summary.unwrap().destructive_count != 1 then panic("mixed destructive count wrong"); fi
+  if !mixed_risks.has_blockers() then panic("mixed unsafe plan not blocked"); fi
+  val no_risks = schema.risk_summary_checked(rt borrow noop);
+  if no_risks.is_err() then panic("empty risk summary rejected"); fi
+  if no_risks.unwrap().safe_count != 0 then panic("empty risk summary inflated"); fi
+  if no_risks.unwrap().destructive_count != 0 then panic("empty destructive summary inflated"); fi
+  val forged_safe_drop = new SchemaPlan(arr[
+    new SchemaStep("drop_column","alpha","key","safe")
+  ]);
+  if !forged_safe_drop.has_blockers() then panic("forged safe drop marked nonblocking"); fi
+  if !schema.risk_summary_checked(rt borrow forged_safe_drop).is_err() then panic("forged safe drop risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_risk).is_err() then panic("forged risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_op).is_err() then panic("arbitrary SQL summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_scope).is_err() then panic("forged table scope risk summary admitted"); fi
+  val forged_identity = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha;DROP","key","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_identity).is_err() then panic("invalid identity risk summary admitted"); fi
   stdio.println("Pure Oreslang schema invariant and metamorphic contracts passed");
   return;
 }
