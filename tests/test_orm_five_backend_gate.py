@@ -24,10 +24,18 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
     def test_contract_is_five_backends_and_four_unmodified_guest_suites(self):
         manifest = gate.load_manifest()
         self.assertEqual(tuple(manifest["backends"]), gate.BACKENDS)
-        self.assertEqual(len(manifest["cases"]), 4)
-        self.assertEqual(len(manifest["backends"]) * len(manifest["cases"]), 20)
+        self.assertEqual(len(manifest["cases"]), 5)
+        self.assertEqual(len(manifest["backends"]) * len(manifest["cases"]), 25)
         self.assertEqual(manifest["status"], "NOT_VERIFIED")
         self.assertEqual(manifest["required_sources"], ["src/schema.ores", "src/pg.ores"])
+        combined = next(entry for entry in manifest["cases"]
+                        if entry["id"] == "combined-orm-modules")
+        code = (ROOT / combined["source"]).read_text(encoding="utf-8")
+        self.assertIn("import module schema from '../src/schema';", code)
+        self.assertIn("import module pg from '../src/pg';", code)
+        self.assertIn("table_typed_pk", code)
+        self.assertIn("table_checked", code)
+        self.assertIn("DDL rendering drift", code)
 
     def test_ambiguous_or_non_json_receipts_are_not_json(self):
         for raw in (
@@ -41,7 +49,7 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     gate.strict_json(raw)
 
-    def test_all_twenty_receipt_shapes_and_adversarial_mutations(self):
+    def test_all_twenty_five_receipt_shapes_and_adversarial_mutations(self):
         manifest = gate.load_manifest()
         with tempfile.TemporaryDirectory() as temp:
             workspace = Path(temp)
@@ -84,7 +92,7 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
                     file.write_text(json.dumps(value), encoding="utf-8")
                 with mock.patch.object(gate.subprocess, "check_output",
                                        side_effect=[HEAD + "\n", ""] * 256):
-                    self.assertEqual(gate.verify_receipts(manifest, directory, HEAD), 20)
+                    self.assertEqual(gate.verify_receipts(manifest, directory, HEAD), 25)
                     target = next(iter(originals))
                     original = originals[target]
                     mutants = (
