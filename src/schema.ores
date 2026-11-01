@@ -86,11 +86,31 @@ pub define class SchemaPlan as
     fi
     return Ok(self.saved_steps.get(index));
   }
+  // Advisory only. Public steps are untrusted: unknown or mismatched
+  // operation/risk pairs MUST be treated as blockers, never as safe DDL.
+  // Even a false result does not authorize applying a migration.
   pub has_blockers(): bool {
     for (val step of self.saved_steps) {
       if step.risk != "safe" then return true; fi
+      if step.op != "add_nullable_column" && step.op != "drop_not_null" then
+        return true;
+      fi
     }
     return false;
+  }
+end
+
+// Immutable data-only risk counts; not an approval token or SQL capability.
+pub define class SchemaRiskSummary as
+  pub val int safe_count;
+  pub val int preflight_count;
+  pub val int manual_count;
+  pub val int destructive_count;
+  pub constructor(int safe_count, int preflight_count, int manual_count, int destructive_count) {
+    self.safe_count = safe_count;
+    self.preflight_count = preflight_count;
+    self.manual_count = manual_count;
+    self.destructive_count = destructive_count;
   }
 end
 
@@ -340,6 +360,27 @@ define module schema as
     }
     output = output + "]}";
     return Ok(output);
+  }
+
+  // Portable, bounded, data-only diagnostics. Reuse the strict review
+  // manifest trust boundary to prevent forged op/risk or risk downgrades.
+  // Counts never authorize SQL or migrations.
+  pub fnc risk_summary_checked(borrow SchemaPlan plan): Result<SchemaRiskSummary, string> {
+    val validated = review_manifest_preview_checked(rt borrow plan);
+    if validated.is_err() then
+      return Err("unadmitted schema risk summary");
+    fi
+    let int safe_count = 0;
+    let int preflight_count = 0;
+    let int manual_count = 0;
+    let int destructive_count = 0;
+    for (val step of plan.steps()) {
+      if step.risk == "safe" then safe_count = safe_count + 1; fi
+      if step.risk == "preflight" then preflight_count = preflight_count + 1; fi
+      if step.risk == "manual" then manual_count = manual_count + 1; fi
+      if step.risk == "destructive" then destructive_count = destructive_count + 1; fi
+    }
+    return Ok(new SchemaRiskSummary(safe_count, preflight_count, manual_count, destructive_count));
   }
 
   // Source-code generation is a preview only, not authority admission.
