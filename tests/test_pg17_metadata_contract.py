@@ -26,6 +26,13 @@ class CatalogMetadataAdmissionTests(unittest.TestCase):
             "polroles=b.expected_roles",
             "UNIQUE_INDEX_DROP_UNDETECTED", "CHECK_CONSTRAINT_DROP_UNDETECTED",
             "DEFAULT_CHANGE_UNDETECTED", "PROTECTED_CATALOG_DRIFT",
+            "INDEX_DEFINITION_SUBSTITUTION_UNDETECTED",
+            "CHECK_DEFINITION_SUBSTITUTION_UNDETECTED",
+            "PRIMARY_KEY_DEFINITION_SUBSTITUTION_UNDETECTED",
+            "ADDITIONAL_UNREVIEWED_INDEX_UNDETECTED",
+            "expected_constraint_defs ON COMMIT DROP",
+            "expected_index_def ON COMMIT DROP", "pg_get_indexdef",
+            "pg_get_constraintdef",
             "GET STACKED DIAGNOSTICS",
             "SELECT count(*) FROM pg_catalog.pg_namespace",
         )
@@ -34,7 +41,7 @@ class CatalogMetadataAdmissionTests(unittest.TestCase):
                 self.assertIn(marker, sql)
         self.assertEqual(sql.count("\nROLLBACK;\n"), 1)
         self.assertNotIn("\nCOMMIT;\n", sql)
-        self.assertEqual(sql.count("EXCEPTION WHEN check_violation"), 9)
+        self.assertEqual(sql.count("EXCEPTION WHEN check_violation"), 13)
         for name in ("version_guard", "assert", "baseline", "negative"):
             self.assertEqual(sql.count("$" + name + "$"), 2)
 
