@@ -765,4 +765,92 @@ define module pg as
       workspace_bind.unwrap(), id_bind.unwrap()
     ]));
   }
+  // SQL-first, checked equality query with deterministic ordering. Limits
+  // are fixed literals from a finite table, never interpolated request text.
+  // A typed SQL NULL uses IS NULL (no value bind), not "= $N" or text "null".
+  pub fnc plan_schema_find_eq_checked(
+    PgTableDescriptor descriptor,
+    Array<string> selected_columns,
+    string filter_column,
+    DbValue filter_value,
+    string workspace,
+    string order_column,
+    bool descending,
+    int page_size
+  ): Result<TypedSelectPlan, string> {
+    val columns = descriptor.columns();
+    if table_descriptor_checked(descriptor.name, columns).is_err() then
+      return Err("unadmitted or malformed table descriptor");
+    fi
+    if !canonical_uuid(workspace) then return Err("invalid workspace UUID"); fi
+    if selected_columns.size == 0 || selected_columns.size > 16 then
+      return Err("projection requires 1 to 16 fields");
+    fi
+    // Explicit finite admission avoids converting an arbitrary integer into
+    // a SQL literal. No OFFSET: stable seek cursors are a future feature.
+    let string limit_sql = "";
+    if page_size == 1 then limit_sql = "1"; fi
+    if page_size == 10 then limit_sql = "10"; fi
+    if page_size == 25 then limit_sql = "25"; fi
+    if page_size == 50 then limit_sql = "50"; fi
+    if page_size == 100 then limit_sql = "100"; fi
+    if limit_sql == "" then return Err("unadmitted page size"); fi
+    let string projections = "";
+    let Array<string> seen = arr[];
+    for (val selected of selected_columns) {
+      if !admitted_identifier(selected) then return Err("invalid projection field"); fi
+      for (val previous of seen) {
+        if previous == selected then return Err("duplicate projection field"); fi
+      }
+      let bool found = false;
+      for (val column of columns) {
+        if column.name == selected then found = true; fi
+      }
+      if !found then return Err("projection field is not declared"); fi
+      if seen.size > 0 then projections = projections + ", "; fi
+      projections = projections + ident(selected);
+      seen.add(selected);
+    }
+    if !admitted_identifier(filter_column) || !admitted_identifier(order_column) then
+      return Err("invalid filter or order field");
+    fi
+    let bool filter_found = false;
+    let bool order_found = false;
+    let ColumnSpec filter_spec = new ColumnSpec("invalid", "text", false);
+    for (val column of columns) {
+      if column.name == filter_column then
+        filter_spec = column;
+        filter_found = true;
+      fi
+      if column.name == order_column then order_found = true; fi
+    }
+    if !filter_found || !order_found then
+      return Err("filter/order field is not declared");
+    fi
+    if !admitted_db_value(filter_value) || filter_value.kind != filter_spec.kind then
+      return Err("invalid filter value or type");
+    fi
+    if filter_value.is_null && !filter_spec.nullable then
+      return Err("SQL NULL filter on nonnullable field");
+    fi
+    val tenant = db_uuid_checked(workspace);
+    if tenant.is_err() then return Err("invalid tenant bind"); fi
+    let Array<DbValue> binds = arr[tenant.unwrap()];
+    let string predicate = ident(filter_column);
+    if filter_value.is_null then
+      predicate = predicate + " IS NULL";
+    else
+      predicate = predicate + " = $2::" + filter_spec.kind;
+      binds.add(filter_value);
+    fi
+    let string direction = " ASC";
+    if descending then direction = " DESC"; fi
+    let string ordering = ident(order_column) + direction;
+    // The row's required UUID primary key supplies a deterministic tie-breaker.
+    if order_column != "id" then ordering = ordering + ", " + ident("id") + direction; fi
+    val sql = "SELECT " + projections + " FROM " + ident(descriptor.name)
+      + " WHERE workspace_id = $1::uuid AND " + predicate
+      + " ORDER BY " + ordering + " LIMIT " + limit_sql;
+    return Ok(new TypedSelectPlan(sql, binds));
+  }
 end

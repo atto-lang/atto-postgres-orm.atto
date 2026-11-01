@@ -76,6 +76,16 @@ values. It rejects `SELECT *`, duplicate/missing columns and untrusted SQL
 fragments. Neither API opens connections or verifies RLS; these are **source
 changes awaiting an actual Oreslang compiler/guest test**.
 
+## Checked equality search (native source; guest unverified)
+
+`plan_schema_find_eq_checked` adds schema-validated equality filters,
+explicit projections, type-matched `DbValue` binds, correct SQL
+`IS NULL` semantics for nullable columns, an explicit order field with
+mandatory primary-key tie-breaking, and fixed page sizes (1, 10, 25,
+50, 100). It rejects raw `ORDER BY` and column SQL fragments, unknown
+fields and invalid tenant UUID strings. This API emits SQL/binds only;
+neither tenant authorization nor a PostgreSQL connection is implemented.
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and

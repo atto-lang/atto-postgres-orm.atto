@@ -246,3 +246,11 @@ field admission; schema-only field scope; immutable tenant/id; mismatched
 codec/NULL; 8-field admission boundary; projection wildcard/unknown/duplicate/
 injected columns; tenant UUIDs and parameter bounds. These are **source-authored
 assertions only** until the exact pinned compiler and PostgreSQL driver run.
+
+Additional pending native guest scenarios cover typed equality search:
+declared filter/order/projection checks, typed text/boolean mismatches,
+SQL injection in bind values, IS NULL for nullable columns without a
+second value bind, impossible NULL on nonnullable columns, deterministic
+primary-key ORDER BY tie-breaking, strict finite LIMIT admission and
+rejection of an unvalidated workspace ID. These are source-authored
+assertions, not executed SQL or evidence of RLS.

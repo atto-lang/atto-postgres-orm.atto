@@ -536,6 +536,61 @@ pub routine main(): void {
     uuid_a, uuid_b).is_err() then panic("SQL projection injection admitted"); fi
   if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["id"],
     "malformed-tenant", uuid_b).is_err() then panic("unchecked select tenant admitted"); fi
+
+  // SQL-first typed equality predicate with deterministic bounded ordering.
+  val search = pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id", "title"], "title", pg.db_text("abc' OR true--"), uuid_a,
+    "title", false, 25);
+  if search.is_err() then panic("typed equality search rejected"); fi
+  if search.unwrap().sql !=
+    "SELECT \"id\", \"title\" FROM \"docs\" WHERE workspace_id = $1::uuid AND \"title\" = $2::text ORDER BY \"title\" ASC, \"id\" ASC LIMIT 25" then
+    panic("equality SQL, ordering or limit changed");
+  fi
+  if search.unwrap().param_count() != 2 then panic("search bind count"); fi
+  if search.unwrap().param_at(1).unwrap().text_value != "abc' OR true--" then
+    panic("search SQL injection value not bound");
+  fi
+  val null_search = pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "note", pg.db_null_checked("text").unwrap(), uuid_a, "id",
+    true, 10);
+  if null_search.is_err() then panic("nullable IS NULL search rejected"); fi
+  if null_search.unwrap().sql !=
+    "SELECT \"id\" FROM \"docs\" WHERE workspace_id = $1::uuid AND \"note\" IS NULL ORDER BY \"id\" DESC LIMIT 10" then
+    panic("NULL search must emit IS NULL without second bind");
+  fi
+  if null_search.unwrap().param_count() != 1 then
+    panic("SQL NULL filter unexpectedly bound a second value");
+  fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_null_checked("text").unwrap(), uuid_a, "id",
+    false, 10).is_err() then panic("NULL predicate admitted on nonnullable field"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_boolean(true), uuid_a, "id",
+    false, 10).is_err() then panic("typed predicate mismatch admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "secret", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("undeclared filter field admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "secret",
+    false, 10).is_err() then panic("undeclared sort field admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "title; DROP",
+    false, 10).is_err() then panic("SQL sort injection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 1000).is_err() then panic("unbounded page size admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 0).is_err() then panic("empty page size admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id", "id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("duplicate result projection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["*"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("wildcard result projection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), "spoofed-workspace", "id",
+    false, 10).is_err() then panic("unvalidated workspace admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
