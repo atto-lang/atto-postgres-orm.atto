@@ -252,10 +252,12 @@ pub routine main(): void {
   fi
   // Prove actual copy-on-admission: changing the legacy array cannot mutate
   // the new plan's private parameter snapshot.
-  val legacy_query = pg.find_in_workspace("runs", "original-workspace", "record-1");
-  val owned_snapshot = pg.snapshot_legacy_query_borrowed(rt borrow legacy_query);
-  legacy_query.params.set(0, "tampered-workspace");
-  legacy_query.params.set(1, "tampered-record");
+  let mut Array<string> legacy_params = arr["original-workspace", "record-1"];
+  val owned_snapshot = pg.snapshot_query_params_borrowed(
+    "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid",
+    rt borrow legacy_params);
+  legacy_params.set(0, "tampered-workspace");
+  legacy_params.set(1, "tampered-record");
   if owned_snapshot.param_at(0).unwrap() != "original-workspace" then
     panic("QueryPlan tenant parameter aliased source array");
   fi
