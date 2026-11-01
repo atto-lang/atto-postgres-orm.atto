@@ -6,6 +6,7 @@ on:
       - 'tests/schema-plans.ores'
       - 'tests/schema-adversarial.ores'
       - 'tests/schema-invariants.ores'
+      - 'tests/orm-cross-backend.ores'
       - 'scripts/verify-native-plans'
       - 'scripts/verify-orm-five-backend-receipts.py'
       - 'tests/test_schema_contract.py'
@@ -54,6 +55,6 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/verify-orm-five-backend-receipts.py | tee orm-parity-preflight.txt
-          grep -Fx 'NOT_VERIFIED: 5 toolchains x 4 suites = 20 compiled guest receipts required' orm-parity-preflight.txt
+          grep -Fx 'NOT_VERIFIED: 5 toolchains x 5 suites = 25 compiled guest receipts required' orm-parity-preflight.txt
       - name: Evidence boundary
         run: echo 'JSON_SCHEMA_HOST_ONLY: no TypeSpec semantic parity, Oreslang compiler, SQL or PostgreSQL tests executed'
