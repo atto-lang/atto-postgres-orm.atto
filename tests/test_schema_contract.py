@@ -1019,6 +1019,12 @@ if [[ "$query" == *'SELECT pg_advisory_xact_lock('* ]]; then
   exit "${MOCK_HOLDER_EXIT:-0}"
 fi
 if [[ "$query" == *'SELECT pg_try_advisory_xact_lock('* ]]; then
+  # Synchronize the fake holder before injecting a bogus result, so a
+  # nonzero result cannot pass merely because the holder never started.
+  for _ in {1..100}; do
+    if [[ -f "$MOCK_LOCK_STARTED" ]]; then break; fi
+    sleep 0.01
+  done
   if [[ "${MOCK_BAD_TRY:-}" == yes ]]; then echo invalid; exit 0; fi
   if [[ "${MOCK_STUCK_LOCK:-}" == yes || -f "$MOCK_LOCK_FILE" ]]; then
     echo f
