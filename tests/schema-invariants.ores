@@ -39,8 +39,10 @@ pub routine main(): void {
   if deleted.unwrap().step_at(1).unwrap().risk != "destructive" then panic("drop risk downgraded"); fi
   if !created.unwrap().has_blockers() then panic("creation review is not a blocker"); fi
   if !deleted.unwrap().has_blockers() then panic("deletion review is not a blocker"); fi
-  val created_manifest = schema.review_manifest_preview_checked(rt borrow created.unwrap());
-  val deleted_manifest = schema.review_manifest_preview_checked(rt borrow deleted.unwrap());
+  val created_plan = created.unwrap();
+  val deleted_plan = deleted.unwrap();
+  val created_manifest = schema.review_manifest_preview_checked(rt borrow created_plan);
+  val deleted_manifest = schema.review_manifest_preview_checked(rt borrow deleted_plan);
   if created_manifest.is_err() || deleted_manifest.is_err() then panic("multi-step review rejected"); fi
   if created_manifest.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == created_manifest.unwrap() then panic("create manifest status lost"); fi
   if deleted_manifest.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == deleted_manifest.unwrap() then panic("drop manifest status lost"); fi
@@ -77,10 +79,11 @@ pub routine main(): void {
   if model_a.unwrap() != model_again.unwrap() then panic("same model preview was nondeterministic"); fi
   if model_a.unwrap().replace_literal("pub define class orm_alpha as","") == model_a.unwrap() then panic("stable ID absent from generated class"); fi
   if model_a.unwrap().replace_literal("pub val bool field_state;","") == model_a.unwrap() then panic("bool field missing from generated class"); fi
-  val desc = schema.table_descriptor_source_preview_checked(rt borrow extra_r.unwrap());
+  val extra_table = extra_r.unwrap();
+  val desc = schema.table_descriptor_source_preview_checked(rt borrow extra_table);
   if desc.is_err() then panic("nullable descriptor incorrectly rejected"); fi
   if desc.unwrap().replace_literal("true","") == desc.unwrap() then panic("nullable descriptor lost true value"); fi
-  if !schema.model_source_preview_checked(rt borrow extra_r.unwrap()).is_err() then panic("unsupported nullable class lowered"); fi
+  if !schema.model_source_preview_checked(rt borrow extra_table).is_err() then panic("unsupported nullable class lowered"); fi
   val forged_name = new SchemaTable("alpha","bad;DROP",arr[key]);
   if !schema.table_descriptor_source_preview_checked(rt borrow forged_name).is_err() then panic("forged table in descriptor"); fi
   if !schema.model_source_preview_checked(rt borrow forged_name).is_err() then panic("forged table in class"); fi
