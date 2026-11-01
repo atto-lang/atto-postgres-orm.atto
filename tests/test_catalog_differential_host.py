@@ -72,6 +72,7 @@ def preview_oracle(manifest):
             or manifest["scope"] != "column_shapes_only"
             or type(manifest["steps"]) is not list or len(manifest["steps"]) > 2048):
         return False
+    seen_steps = set()
     for step in manifest["steps"]:
         if not exact_keys(step, ("op", "table_id", "column_id", "risk")):
             return False
@@ -85,6 +86,11 @@ def preview_oracle(manifest):
                 return False
         elif not admitted_name(step["column_id"]):
             return False
+        # Matches JSON Schema's uniqueItems on fully admitted step objects.
+        identity = (op, step["table_id"], step["column_id"], step["risk"])
+        if identity in seen_steps:
+            return False
+        seen_steps.add(identity)
     return True
 
 
@@ -226,3 +232,22 @@ class DifferentialHostOracleTests(unittest.TestCase):
         source = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
         self.assertIn("duplicate catalog table stable identity", source)
         self.assertIn("duplicate catalog physical table name", source)
+
+
+    def test_duplicate_review_steps_are_not_structurally_admitted(self):
+        original = copy.deepcopy(self.preview_example)
+        first = copy.deepcopy(original["steps"][0])
+        candidate = copy.deepcopy(original)
+        candidate["steps"] = [first, copy.deepcopy(first)]
+        self.check_preview(candidate, "duplicate exact step must be rejected")
+        self.assertFalse(self.preview_validator.is_valid(candidate))
+        candidate["steps"] = [first, {
+            "op": "review_drop_table", "table_id": first["table_id"],
+            "column_id": "", "risk": "destructive",
+        }]
+        self.check_preview(candidate, "different legal steps are not duplicates")
+        self.assertTrue(self.preview_validator.is_valid(candidate))
+        # Reordering cannot make a duplicate become an authorized preview.
+        candidate["steps"].append(copy.deepcopy(first))
+        self.check_preview(candidate, "nonadjacent duplicate is rejected")
+        self.assertFalse(self.preview_validator.is_valid(candidate))
