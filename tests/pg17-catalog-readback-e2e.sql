@@ -18,7 +18,7 @@ CREATE TABLE accounts (
   label text NOT NULL,
   PRIMARY KEY (workspace_id, id)
 );
-CREATE FUNCTION pg_temp.assert_shape(expected text) RETURNS void
+CREATE FUNCTION assert_shape(expected text) RETURNS void
 LANGUAGE plpgsql AS $check$
 DECLARE actual text;
 BEGIN
@@ -36,7 +36,7 @@ END
 $check$;
 DO $baseline$
 BEGIN
-  PERFORM pg_temp.assert_shape('workspace_id:uuid:true,id:uuid:true,label:text:true');
+  PERFORM assert_shape('workspace_id:uuid:true,id:uuid:true,label:text:true');
 END
 $baseline$;
 -- Actual catalog migration, repeated under a stable precondition.
@@ -54,35 +54,70 @@ BEGIN
     WHERE attrelid='accounts'::regclass AND attname='notes' AND NOT attisdropped) THEN
     ALTER TABLE accounts ADD COLUMN notes text;
   END IF;
-  PERFORM pg_temp.assert_shape(
+  PERFORM assert_shape(
     'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
 END
 $idempotency$;
 -- Every injected drift must be rejected, and its subtransaction undone.
 DO $negative$
+DECLARE drift_message text;
 BEGIN
   BEGIN
     ALTER TABLE accounts ALTER COLUMN notes TYPE integer USING NULL::integer;
-    PERFORM pg_temp.assert_shape(
+    PERFORM assert_shape(
       'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
     RAISE EXCEPTION 'TYPE_DRIFT_NOT_CAUGHT';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS drift_message = MESSAGE_TEXT;
+    IF drift_message <> 'CATALOG_SHAPE_DRIFT' THEN
+      RAISE EXCEPTION 'WRONG_DRIFT_DIAGNOSTIC: %', drift_message;
+    END IF;
   END;
   BEGIN
     ALTER TABLE accounts RENAME COLUMN label TO substituted_label;
-    PERFORM pg_temp.assert_shape(
+    PERFORM assert_shape(
       'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
     RAISE EXCEPTION 'RENAME_DRIFT_NOT_CAUGHT';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS drift_message = MESSAGE_TEXT;
+    IF drift_message <> 'CATALOG_SHAPE_DRIFT' THEN
+      RAISE EXCEPTION 'WRONG_DRIFT_DIAGNOSTIC: %', drift_message;
+    END IF;
   END;
   BEGIN
     ALTER TABLE accounts ADD COLUMN injected boolean;
-    PERFORM pg_temp.assert_shape(
+    PERFORM assert_shape(
       'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
     RAISE EXCEPTION 'EXTRA_COLUMN_NOT_CAUGHT';
-  EXCEPTION WHEN check_violation THEN NULL;
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS drift_message = MESSAGE_TEXT;
+    IF drift_message <> 'CATALOG_SHAPE_DRIFT' THEN
+      RAISE EXCEPTION 'WRONG_DRIFT_DIAGNOSTIC: %', drift_message;
+    END IF;
   END;
-  PERFORM pg_temp.assert_shape(
+  BEGIN
+    ALTER TABLE accounts ALTER COLUMN label DROP NOT NULL;
+    PERFORM assert_shape(
+      'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
+    RAISE EXCEPTION 'NULLABILITY_DRIFT_NOT_CAUGHT';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS drift_message = MESSAGE_TEXT;
+    IF drift_message <> 'CATALOG_SHAPE_DRIFT' THEN
+      RAISE EXCEPTION 'WRONG_DRIFT_DIAGNOSTIC: %', drift_message;
+    END IF;
+  END;
+  BEGIN
+    ALTER TABLE accounts DROP COLUMN label;
+    PERFORM assert_shape(
+      'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
+    RAISE EXCEPTION 'COLUMN_DROP_NOT_CAUGHT';
+  EXCEPTION WHEN check_violation THEN
+    GET STACKED DIAGNOSTICS drift_message = MESSAGE_TEXT;
+    IF drift_message <> 'CATALOG_SHAPE_DRIFT' THEN
+      RAISE EXCEPTION 'WRONG_DRIFT_DIAGNOSTIC: %', drift_message;
+    END IF;
+  END;
+  PERFORM assert_shape(
     'workspace_id:uuid:true,id:uuid:true,label:text:true,notes:text:false');
 END
 $negative$;
