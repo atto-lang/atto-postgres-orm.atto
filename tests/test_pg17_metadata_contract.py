@@ -22,6 +22,8 @@ class CatalogMetadataAdmissionTests(unittest.TestCase):
             "ALTER TABLE guarded_records ADD COLUMN notes text",
             "RLS_DISABLE_UNDETECTED", "RLS_FORCE_UNDETECTED",
             "POLICY_DROP_UNDETECTED", "POLICY_WEAKEN_UNDETECTED",
+            "POLICY_ROLE_CHANGE_UNDETECTED", "EXTRA_PERMISSIVE_POLICY_UNDETECTED",
+            "polroles=b.expected_roles",
             "UNIQUE_INDEX_DROP_UNDETECTED", "CHECK_CONSTRAINT_DROP_UNDETECTED",
             "DEFAULT_CHANGE_UNDETECTED", "PROTECTED_CATALOG_DRIFT",
             "GET STACKED DIAGNOSTICS",
@@ -32,7 +34,7 @@ class CatalogMetadataAdmissionTests(unittest.TestCase):
                 self.assertIn(marker, sql)
         self.assertEqual(sql.count("\nROLLBACK;\n"), 1)
         self.assertNotIn("\nCOMMIT;\n", sql)
-        self.assertEqual(sql.count("EXCEPTION WHEN check_violation"), 7)
+        self.assertEqual(sql.count("EXCEPTION WHEN check_violation"), 9)
         for name in ("version_guard", "assert", "baseline", "negative"):
             self.assertEqual(sql.count("$" + name + "$"), 2)
 
