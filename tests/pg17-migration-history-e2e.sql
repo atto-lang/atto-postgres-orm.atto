@@ -100,6 +100,49 @@ BEGIN
   END;
 END
 $negative$;
+-- Simulate a failed migration that wrote a ledger row but rolled back to a
+-- savepoint. Re-execution must neither see nor trust the discarded digest.
+SAVEPOINT aborted_migration;
+DO $rollback_replay$
+DECLARE got text;
+BEGIN
+  got := record_migration(3, repeat('f',64));
+  IF got <> 'APPLIED' THEN RAISE EXCEPTION 'TRANSIENT_APPLY_NOT_NEW'; END IF;
+  got := record_migration(3, repeat('f',64));
+  IF got <> 'REPLAY_OK' THEN RAISE EXCEPTION 'TRANSIENT_REPLAY_NOT_STABLE'; END IF;
+  IF (SELECT count(*) FROM applied_migrations) <> 3 THEN
+    RAISE EXCEPTION 'TRANSIENT_LEDGER_WRONG_ROW_COUNT';
+  END IF;
+END
+$rollback_replay$;
+ROLLBACK TO SAVEPOINT aborted_migration;
+RELEASE SAVEPOINT aborted_migration;
+DO $rolled_back$
+DECLARE
+  count_rows integer;
+  got text;
+BEGIN
+  SELECT count(*) INTO count_rows FROM applied_migrations;
+  IF count_rows <> 2 THEN RAISE EXCEPTION 'ABORTED_LEDGER_ROW_SURVIVED'; END IF;
+  IF EXISTS (SELECT 1 FROM applied_migrations WHERE version=3) THEN
+    RAISE EXCEPTION 'ABORTED_LEDGER_VERSION_SURVIVED';
+  END IF;
+  -- A different digest for that abandoned version must be newly admissible;
+  -- exercise it in a nested exception subtransaction, then undo the insert.
+  BEGIN
+    got := record_migration(3, repeat('g',64));
+    IF got <> 'APPLIED' THEN
+      RAISE EXCEPTION 'RECOVERY_REPLAY_WAS_NOT_FRESH';
+    END IF;
+    RAISE EXCEPTION USING ERRCODE = 'P0001', MESSAGE = 'UNDO_RECOVERY_PROBE';
+  EXCEPTION WHEN raise_exception THEN
+    IF SQLERRM <> 'UNDO_RECOVERY_PROBE' THEN RAISE; END IF;
+  END;
+  IF (SELECT count(*) FROM applied_migrations) <> 2 THEN
+    RAISE EXCEPTION 'RECOVERY_PROBE_LEFT_LEDGER_ROW';
+  END IF;
+END
+$rolled_back$;
 SELECT count(*) FROM applied_migrations;
 SELECT count(*) FROM applied_migrations WHERE version = 1 AND sha256_hex = repeat('a',64);
 SELECT 'PG17_MIGRATION_HISTORY_E2E_OK';
