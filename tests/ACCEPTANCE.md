@@ -300,3 +300,48 @@ The seventh Oreslang guest adds independent three-way
 `plan_from_snapshot_checked` cases for fresh, stale, malformed and permuted
 snapshots, including a desired state that happens to equal unauthorized
 observed drift. Both native and shell smoke tests need a stepful trusted run.
+
+
+## PostgreSQL 17 SQL-only catalog and migration-lock E2E — authored, not DB-executed
+
+Two new disposable-database integration fixtures are included in
+`.github/workflows/pg17-ddl-integration.yml` and are strictly separate
+from the pinned JDK25 pure Oreslang guest verification gate.
+
+- `tests/pg17-catalog-readback-e2e.bash` validates explicit opt-in,
+  a PG17 server-version probe, a bounded temporary schema name and an exact
+  two-line receipt. It runs `tests/pg17-catalog-readback-e2e.sql`, which
+  captures real `pg_catalog.pg_attribute` column name/type/nullability
+  projections, repeats a guarded nullable-column addition, rejects injected
+  column type, rename and extra-column drift, then **ROLLBACKs** and requires
+  zero surviving fixture schemas.
+- `tests/pg17-migration-lock-e2e.bash` opens **two independent PostgreSQL
+  connections**, requires a real `pg_try_advisory_xact_lock` conflict while
+  one transaction holds the lock, and verifies post-COMMIT release. A missed
+  lock or unsuccessful holder cannot produce a passing receipt.
+
+Run **only against an isolated disposable PostgreSQL 17 database**:
+
+```sh
+export PG_TEST_DISPOSABLE=I_ACKNOWLEDGE_DISPOSABLE_DATABASE
+export PG_TEST_DSN='postgresql://test_user@isolated_host/disposable_db'
+bash tests/pg17-catalog-readback-e2e.bash
+bash tests/pg17-migration-lock-e2e.bash
+```
+
+**Executed host-only evidence:** the two GitHub Bash blob identities
+`4b6b50d62f64362f62d8a957a37f5e6a1d38e4c8` and
+`deb83d7d50641af6eafb9e90b2fac7d98386fc3d` matched the local
+byte-for-byte Bash files via `git hash-object`. Both passed `bash -n`.
+An **18/18** local **fake-psql** test matrix passed missing opt-in, missing
+DSN, PostgreSQL 16/18/malformed versions, version-probe errors, mocked
+correct/wrong rollback receipts, failed mocked catalog commands and simulated
+two-session lock behavior. That is harness verification, **NOT live PG17**.
+
+The PostgreSQL 17 server was unavailable in the local execution container
+and source Actions jobs still failed before runner allocation; these two
+actual database tests remain **NOT EXECUTED**. Do not promote, merge or
+claim live PostgreSQL proof from fake-pg mocks. These tests do not certify
+TypeSpec/JSON Schema semantic parity, a stable-ID ledger, unmodeled database
+objects, actual DPM migration artifacts, a native Oreslang driver, actor
+leases, or backend parity.
