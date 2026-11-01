@@ -115,6 +115,27 @@ fn verifier_retains_all_seven_real_guest_oracles() {
 }
 
 #[test]
+fn matched_catalog_diff_avoids_placeholder_heap_object() {
+    let diff = section(
+        SOURCE,
+        "pub fnc diff_catalog_checked(",
+        "// A stable-ID *review* manifest",
+    );
+    assert!(!diff.contains("new SchemaTable(\"placeholder\""));
+    assert!(!diff.contains("existing_match = existing"));
+    assert!(diff.contains("diff_checked(rt borrow wanted, rt borrow existing)"));
+    assert!(diff.contains("if !matched then"));
+    for oracle in [
+        "two matched table diff lost a change",
+        "first matched table order changed",
+        "second matched table order changed",
+        "second matched table risk changed",
+    ] {
+        assert!(GUEST.contains(oracle), "missing multi-table oracle: {oracle}");
+    }
+}
+
+#[test]
 fn portable_profile_caps_enforced_in_source() {
     assert!(SOURCE.contains("columns.size > 64"));
     assert!(SOURCE.contains("tables.size > 256"));
