@@ -7,8 +7,10 @@ on:
       - 'tests/schema-adversarial.ores'
       - 'tests/schema-invariants.ores'
       - 'scripts/verify-native-plans'
+      - 'scripts/verify-orm-five-backend-receipts.py'
       - 'tests/test_schema_contract.py'
       - 'tests/test_catalog_differential_host.py'
+      - 'tests/test_orm_five_backend_gate.py'
       - 'tests/test_pg17_metadata_contract.py'
       - 'tests/pg17-catalog-readback-e2e.sql'
       - 'tests/pg17-catalog-metadata-e2e.sql'
@@ -42,11 +44,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m compileall -q tests/test_schema_contract.py tests/test_pg17_metadata_contract.py
+          python -m compileall -q tests scripts/verify-orm-five-backend-receipts.py
           for script in tests/pg17-*.bash; do
             bash -n "$script"
           done
       - name: Validate peer JSON Schema fixtures and hostile inputs
         run: python -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Audit five-backend ORM receipt coverage (source only)
+        run: |
+          set -euo pipefail
+          python scripts/verify-orm-five-backend-receipts.py | tee orm-parity-preflight.txt
+          grep -Fx 'NOT_VERIFIED: 5 toolchains x 4 suites = 20 compiled guest receipts required' orm-parity-preflight.txt
       - name: Evidence boundary
         run: echo 'JSON_SCHEMA_HOST_ONLY: no TypeSpec semantic parity, Oreslang compiler, SQL or PostgreSQL tests executed'
