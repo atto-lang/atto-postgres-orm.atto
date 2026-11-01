@@ -281,3 +281,7 @@ cross-backend parity.
 ### PostgreSQL 17 prepared DML SQL-only gate
 
 An opt-in disposable test in `tests/pg17-dml-contract.bash` validates two authored Oreslang SQL plan goldens, then uses real PostgreSQL PREPARE/EXECUTE with typed UUID/text binds, explicit SQL NULL, and rollback. `tests/verify-pg17-dml-host.bash` provides **10 host-only admission/mocking cases**, separately from real PostgreSQL. It does **not** run the Oreslang compiler, wire driver, actor transactions or authenticated tenant RLS.
+
+### Canonical NotSet admission (native guest not yet verified)
+
+All checked mutation paths revalidate the state and payload of public FieldChange instances. The temporary non-generic NotSet representation now requires an empty non-NULL text sentinel; explicit typed SQL NULL remains a separate Set state. Regression fixtures reject hidden boolean, hidden text and hidden NULL payloads. Host source guards run separately from unverified native compiler tests.

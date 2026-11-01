@@ -333,6 +333,25 @@ pub routine main(): void {
   if !typed_write.unwrap().param_at(3).is_err() then
     panic("oversized patch bind offset admitted");
   fi
+  // NotSet is omission, never a carrier for hidden data or SQL NULL.
+  if !pg.admitted_field_change(pg.change_not_set()) then
+    panic("canonical NotSet sentinel was rejected");
+  fi
+  if !pg.change_checked("not_set", pg.db_boolean(false)).is_err() then
+    panic("NotSet admitted a hidden boolean payload");
+  fi
+  if !pg.change_checked("not_set", pg.db_text("hidden")).is_err() then
+    panic("NotSet admitted a hidden text payload");
+  fi
+  if !pg.change_checked("not_set", pg.db_null_checked("text").unwrap()).is_err() then
+    panic("NotSet silently conflated NULL with omission");
+  fi
+  if pg.change_checked("set", pg.db_text("ok")).is_err() then
+    panic("valid Set payload rejected");
+  fi
+  if pg.change_checked("unchanged", pg.db_boolean(true)).is_err() then
+    panic("valid Unchanged payload rejected");
+  fi
   val omitted = pg.plan_update_field_checked("docs", note_field,
     pg.change_not_set(), uuid_a, uuid_b);
   if omitted.is_err() then panic("NotSet planner returned error"); fi

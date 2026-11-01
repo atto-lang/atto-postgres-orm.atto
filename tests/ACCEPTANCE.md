@@ -326,3 +326,7 @@ assertions, not executed SQL or evidence of RLS.
 New unexecuted INSERT guest cases cover required-field admission, NotSet versus SQL NULL, type and duplicate errors, tenant/id spoof prevention at the SQL planner boundary, bind ordering and injection separation. No database integration or authenticated tenant authority exists.
 
 The prepared-DML SQL-only contract has a corresponding host-only fail-closed mock suite (10 scenarios) for opt-in, exact fixture drift before connection, PostgreSQL 17 version admission, malformed output, SQL-process failure and rollback evidence. The host mock is not actual PostgreSQL or native Oreslang evidence. The real SQL contract runs as a separate workflow step with a disposable PostgreSQL 17 service.
+
+### New NotSet sentinel adversarial tests (NOT NATIVE VERIFIED)
+
+The Oreslang guest asserts canonical NotSet admission and rejection of hidden boolean/text/SQL NULL values, retaining valid Set and Unchanged semantics. Host guards verify revalidation in single-field UPDATE, multi-field UPDATE and INSERT. These authored tests are not yet a native guest result.

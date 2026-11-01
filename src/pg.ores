@@ -588,12 +588,23 @@ define module pg as
     if !admitted_db_value(candidate) then return Err("invalid encoded PostgreSQL bind"); fi
     return Ok(candidate);
   }
-  pub fnc change_checked(string state, DbValue value): Result<FieldChange, string> {
-    if state != "not_set" && state != "unchanged" && state != "set" then
-      return Err("invalid field change state");
+  // This non-generic representation requires a single canonical NotSet
+  // sentinel (empty non-NULL text) until AOT Change<T> is available.
+  // Constructors are public, so validate public instances at every use.
+  pub fnc admitted_field_change(FieldChange change): bool {
+    if change.state == "not_set" then
+      return change.value.kind == "text" && change.value.text_value == ""
+        && !change.value.is_null;
     fi
-    if !admitted_db_value(value) then return Err("invalid field change value"); fi
-    return Ok(new FieldChange(state, value));
+    if change.state != "set" && change.state != "unchanged" then return false; fi
+    return admitted_db_value(change.value);
+  }
+  pub fnc change_checked(string state, DbValue value): Result<FieldChange, string> {
+    val candidate = new FieldChange(state, value);
+    if !admitted_field_change(candidate) then
+      return Err("invalid field change state or payload");
+    fi
+    return Ok(candidate);
   }
   pub fnc change_not_set(): FieldChange {
     return new FieldChange("not_set", db_text(""));
@@ -626,11 +637,11 @@ define module pg as
     if !canonical_uuid(workspace) || !canonical_uuid(id) then
       return Err("invalid patch workspace or record UUID");
     fi
+    if !admitted_field_change(change) then
+      return Err("invalid patch change state or payload");
+    fi
     if change.state == "not_set" then
       return Ok(new TypedPatchPlan("", true, arr[]));
-    fi
-    if change.state != "set" && change.state != "unchanged" then
-      return Err("invalid patch change state");
     fi
     if !admitted_db_value(change.value) || change.value.kind != field.kind then
       return Err("patch bind type mismatch or invalid value");
@@ -705,8 +716,8 @@ define module pg as
         && edit.change.state != "not_set" then
         return Err("invalid patch change state");
       fi
-      if !admitted_db_value(edit.change.value) then
-        return Err("invalid patch field value");
+      if !admitted_field_change(edit.change) then
+        return Err("invalid patch field state or value");
       fi
       if edit.change.state != "not_set" then
         if edit.change.value.kind != column_decl.kind then
@@ -918,8 +929,8 @@ define module pg as
       if entry.change.state != "set" && entry.change.state != "not_set" then
         return Err("invalid insert field change state");
       fi
-      if !admitted_db_value(entry.change.value) then
-        return Err("invalid typed insert value");
+      if !admitted_field_change(entry.change) then
+        return Err("invalid typed insert field state or value");
       fi
       if entry.change.state == "not_set" then
         if !field.nullable then return Err("missing required insert value"); fi

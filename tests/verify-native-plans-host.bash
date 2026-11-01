@@ -21,6 +21,13 @@ grep -Fq 'for (val control of arr[' "$root/tests/plans.ores"
 # Verify the typed renderer rejects every character left by the ASCII map.
 grep -Fq 'if name == "" || name.replace_literal("|", "") != name then return false; fi' "$root/src/pg.ores"
 grep -Fq 'if mapped.replace_literal("|", "") != "" then return false; fi' "$root/src/pg.ores"
+# NotSet and explicit SQL NULL are different. These are host-only source
+# integrity guards, not a native guest/compiler execution result.
+grep -Fq 'pub fnc admitted_field_change(FieldChange change): bool' "$root/src/pg.ores"
+grep -Fq 'if !admitted_field_change(change) then' "$root/src/pg.ores"
+grep -Fq 'if !admitted_field_change(edit.change) then' "$root/src/pg.ores"
+grep -Fq 'if !admitted_field_change(entry.change) then' "$root/src/pg.ores"
+grep -Fq 'NotSet silently conflated NULL with omission' "$root/tests/plans.ores"
 grep -Fq 'if pg.admitted_identifier("nameé")' "$root/tests/plans.ores"
 grep -Fq 'if pg.admitted_identifier("Ωname")' "$root/tests/plans.ores"
 grep -Fq 'if pg.admitted_identifier("name|other")' "$root/tests/plans.ores"
