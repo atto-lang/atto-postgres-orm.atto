@@ -334,6 +334,134 @@ pub routine main(): void {
     pg.checked_db_value("uuid", "", true).unwrap(),
     pg.checked_db_value("uuid", "record-id", false).unwrap()
   ]).is_err() then panic("NULL typed workspace bind admitted"); fi
+  // PostgreSQL v3 wire codec: exact byte framing and SQL/value separation.
+  val i16_bytes = pg.wire_i16_be(4660);
+  if i16_bytes.is_err()
+    || i16_bytes.unwrap().size != 2
+    || i16_bytes.unwrap().get(0) != 18
+    || i16_bytes.unwrap().get(1) != 52 then
+    panic("PostgreSQL i16 big-endian encoding mismatch");
+  fi
+  val null_i32 = pg.wire_i32_be(-1);
+  if null_i32.is_err()
+    || null_i32.unwrap().get(0) != 255
+    || null_i32.unwrap().get(1) != 255
+    || null_i32.unwrap().get(2) != 255
+    || null_i32.unwrap().get(3) != 255 then
+    panic("PostgreSQL NULL i32 encoding mismatch");
+  fi
+  if !pg.wire_i32_be(-2).is_err() then panic("invalid negative wire i32 admitted"); fi
+
+  val utf8_cstring = pg.wire_cstring("é😀");
+  if utf8_cstring.is_err() then panic("valid UTF-8 PostgreSQL C-string rejected"); fi
+  val utf8_wire = utf8_cstring.unwrap();
+  val List<int> utf8_expected = [195, 169, 240, 159, 152, 128, 0];
+  if utf8_wire.size != utf8_expected.size then panic("UTF-8 C-string length mismatch"); fi
+  for (let int utf8_index = 0; utf8_index < utf8_expected.size; utf8_index++) {
+    if utf8_wire.get(utf8_index) != utf8_expected.get(utf8_index) then
+      panic("UTF-8 C-string byte mismatch");
+    fi
+  }
+  if !pg.wire_cstring("A\u0000B").is_err() then
+    panic("embedded NUL admitted to PostgreSQL C-string");
+  fi
+
+  val startup = pg.wire_startup_message("u", "d");
+  if startup.is_err() then panic("valid PostgreSQL startup message rejected"); fi
+  val List<int> startup_expected = [
+    0, 0, 0, 48, 0, 3, 0, 0,
+    117, 115, 101, 114, 0, 117, 0,
+    100, 97, 116, 97, 98, 97, 115, 101, 0, 100, 0,
+    99, 108, 105, 101, 110, 116, 95, 101, 110, 99, 111, 100, 105, 110, 103, 0,
+    85, 84, 70, 56, 0, 0
+  ];
+  val startup_wire = startup.unwrap();
+  if startup_wire.size != startup_expected.size then panic("startup wire length mismatch"); fi
+  for (let int startup_index = 0; startup_index < startup_expected.size; startup_index++) {
+    if startup_wire.get(startup_index) != startup_expected.get(startup_index) then
+      panic("startup wire byte mismatch");
+    fi
+  }
+
+  val simple_query = pg.wire_simple_query_message("SELECT 1");
+  if simple_query.is_err() then panic("valid simple query rejected"); fi
+  val List<int> simple_expected = [81, 0, 0, 0, 13, 83, 69, 76, 69, 67, 84, 32, 49, 0];
+  val simple_wire = simple_query.unwrap();
+  if simple_wire.size != simple_expected.size then panic("simple query frame length mismatch"); fi
+  for (let int simple_index = 0; simple_index < simple_expected.size; simple_index++) {
+    if simple_wire.get(simple_index) != simple_expected.get(simple_index) then
+      panic("simple query frame byte mismatch");
+    fi
+  }
+
+  val wire_plan_a = pg.find_in_workspace_typed_plan_checked(
+    "runs", "hostile' OR true--", "record-1");
+  val wire_plan_b = pg.find_in_workspace_typed_plan_checked(
+    "runs", "different-value", "record-2");
+  if wire_plan_a.is_err() || wire_plan_b.is_err() then panic("wire typed plan rejected"); fi
+  val parse_a = pg.wire_parse_unnamed_message(wire_plan_a.unwrap());
+  val parse_b = pg.wire_parse_unnamed_message(wire_plan_b.unwrap());
+  if parse_a.is_err() || parse_b.is_err() then panic("wire Parse encoding rejected"); fi
+  val parse_a_bytes = parse_a.unwrap();
+  val parse_b_bytes = parse_b.unwrap();
+  if parse_a_bytes.size != parse_b_bytes.size then
+    panic("parameter values changed Parse frame length");
+  fi
+  for (let int parse_index = 0; parse_index < parse_a_bytes.size; parse_index++) {
+    if parse_a_bytes.get(parse_index) != parse_b_bytes.get(parse_index) then
+      panic("parameter values leaked into Parse/SQL frame");
+    fi
+  }
+  if parse_a_bytes.get(0) != 80 then panic("Parse message tag mismatch"); fi
+  val parse_length = pg.wire_i32_be(parse_a_bytes.size - 1);
+  if parse_length.is_err() then panic("Parse length not representable"); fi
+  for (let int length_index = 0; length_index < 4; length_index++) {
+    if parse_a_bytes.get(length_index + 1) != parse_length.unwrap().get(length_index) then
+      panic("Parse frame length header mismatch");
+    fi
+  }
+
+  val bind_a = pg.wire_bind_unnamed_message(wire_plan_a.unwrap());
+  val bind_b = pg.wire_bind_unnamed_message(wire_plan_b.unwrap());
+  if bind_a.is_err() || bind_b.is_err() then panic("wire Bind encoding rejected"); fi
+  val bind_a_bytes = bind_a.unwrap();
+  val bind_b_bytes = bind_b.unwrap();
+  if bind_a_bytes.get(0) != 66 || bind_a_bytes.get(5) != 0 || bind_a_bytes.get(6) != 0 then
+    panic("Bind unnamed portal/statement framing mismatch");
+  fi
+  if bind_a_bytes.get(7) != 0 || bind_a_bytes.get(8) != 0
+    || bind_a_bytes.get(9) != 0 || bind_a_bytes.get(10) != 2 then
+    panic("Bind text-format/parameter-count header mismatch");
+  fi
+  let bool bind_differs = bind_a_bytes.size != bind_b_bytes.size;
+  if !bind_differs then
+    for (let int bind_index = 0; bind_index < bind_a_bytes.size; bind_index++) {
+      if bind_a_bytes.get(bind_index) != bind_b_bytes.get(bind_index) then
+        bind_differs = true;
+      fi
+    }
+  fi
+  if !bind_differs then panic("different bind values produced identical Bind frames"); fi
+
+  val describe = pg.wire_describe_unnamed_portal_message();
+  if describe.size != 7 || describe.get(0) != 68 || describe.get(5) != 80 || describe.get(6) != 0 then
+    panic("Describe unnamed portal frame mismatch");
+  fi
+  val execute = pg.wire_execute_unnamed_message(0);
+  if execute.is_err() then panic("Execute frame rejected"); fi
+  val execute_bytes = execute.unwrap();
+  val List<int> execute_expected = [69, 0, 0, 0, 9, 0, 0, 0, 0, 0];
+  if execute_bytes.size != execute_expected.size then panic("Execute frame length mismatch"); fi
+  for (let int execute_index = 0; execute_index < execute_expected.size; execute_index++) {
+    if execute_bytes.get(execute_index) != execute_expected.get(execute_index) then
+      panic("Execute frame byte mismatch");
+    fi
+  }
+  val sync = pg.wire_sync_message();
+  if sync.size != 5 || sync.get(0) != 83 || sync.get(4) != 4 then
+    panic("Sync frame mismatch");
+  fi
+
   // Actor-owned connection lease / transaction fencing contract.
   val acquired_lease = pg.acquire_connection_checked(
     "conn_1", "actor-A", 3, 7, "tenant_a");
