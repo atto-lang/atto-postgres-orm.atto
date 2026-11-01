@@ -1016,11 +1016,11 @@ if [[ "$query" == *'SELECT pg_advisory_xact_lock('* ]]; then
   touch "$MOCK_LOCK_STARTED" "$MOCK_LOCK_FILE"
   sleep 0.25
   rm -f "$MOCK_LOCK_FILE"
-  exit "\${MOCK_HOLDER_EXIT:-0}"
+  exit "${MOCK_HOLDER_EXIT:-0}"
 fi
 if [[ "$query" == *'SELECT pg_try_advisory_xact_lock('* ]]; then
-  if [[ "\${MOCK_BAD_TRY:-}" == yes ]]; then echo invalid; exit 0; fi
-  if [[ "\${MOCK_STUCK_LOCK:-}" == yes || -f "$MOCK_LOCK_FILE" ]]; then
+  if [[ "${MOCK_BAD_TRY:-}" == yes ]]; then echo invalid; exit 0; fi
+  if [[ "${MOCK_STUCK_LOCK:-}" == yes || -f "$MOCK_LOCK_FILE" ]]; then
     echo f
   else
     echo t
