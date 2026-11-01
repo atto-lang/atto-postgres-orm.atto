@@ -392,7 +392,7 @@ define module pg as
   // This is a tag/value admission check, NOT a UUID or JSON parser.
   // A future driver must check again at its own trust boundary and enforce
   // byte caps, PostgreSQL type coercion and binary/text wire encoding.
-  pub fnc admitted_db_value(DbValue value): bool {
+  pub fnc admitted_db_value(borrow DbValue value): bool {
     if value.kind != "uuid" && value.kind != "text" && value.kind != "integer"
       && value.kind != "bigint" && value.kind != "boolean"
       && value.kind != "jsonb" && value.kind != "timestamptz"
@@ -405,7 +405,7 @@ define module pg as
   }
   pub fnc checked_db_value(string kind, string scalar, bool is_null): Result<DbValue, string> {
     val value = new DbValue(kind, scalar, is_null);
-    if !admitted_db_value(value) then return Err("unadmitted PostgreSQL bind value"); fi
+    if !admitted_db_value(rt borrow value) then return Err("unadmitted PostgreSQL bind value"); fi
     return Ok(value);
   }
   // The only public typed plan adapter accepts exactly two admitted,
@@ -419,7 +419,7 @@ define module pg as
     fi
     if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
     for (val value of values) {
-      if !admitted_db_value(value) then
+      if !admitted_db_value(rt borrow value) then
         return Err("unadmitted PostgreSQL bind value");
       fi
       if value.kind != "uuid" || value.is_null then
@@ -440,7 +440,7 @@ define module pg as
     let mut Array<DbValue> copy = arr[];
     for (let int index = 0; index < values.size; index++) {
       val value = values.get(index);
-      if !admitted_db_value(value) then
+      if !admitted_db_value(rt borrow value) then
         return Err("unadmitted PostgreSQL bind value");
       fi
       if value.kind != "uuid" || value.is_null then
