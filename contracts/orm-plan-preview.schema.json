@@ -59,13 +59,13 @@
         },
         "table_id": {
           "type": "string",
-          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])",
           "minLength": 1,
           "maxLength": 63
         },
         "column_id": {
           "type": "string",
-          "pattern": "^$|^[A-Za-z_][A-Za-z0-9_]*$",
+          "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]*)?(?![\\s\\S])",
           "maxLength": 63
         },
         "risk": {
