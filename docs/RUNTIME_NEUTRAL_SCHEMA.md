@@ -306,3 +306,47 @@ execution, TypeSpec/TJSV parity, PostgreSQL 17 introspection or DPM
 migration replay/rollback/locking. Do not transfer private source to
 an alternate organization while the existing incident hold applies.
 Keep changes in draft pending native and database execution evidence.
+
+
+## Offline PostgreSQL 17 catalog projection and stable-ID ledger (stage 9)
+
+The HOST-ONLY `scripts/orm_pg_catalog_projection_host.py` converts an
+illustrative PostgreSQL-17-flavored capture plus an explicitly supplied
+stable-ID ledger into the existing runtime-neutral **column-shapes-only**
+catalog. It performs **no database I/O, read-only query, or SQL execution**.
+
+The checked-in sample inputs are
+`contracts/examples/pg17-capture.offline.json` and
+`contracts/examples/pg17-ledger.offline.json`. They are invented fixtures,
+NOT evidence of a real PostgreSQL database or a reviewed production ledger.
+
+Fail-closed checks require PostgreSQL 17 version pinning, identical cluster
+system identifier and database OID, exact one-to-one table OID and column
+attnum mappings, no duplicates, an admitted public-schema ordinary table
+and conservative physical identifier/type admission. A changed physical name
+retains its existing stable ID **only when the same reviewed scoped OID/attnum
+mapping is present**; names alone never infer identities.
+
+No reported RLS, policies, indexes, constraints, defaults, generated columns,
+identity columns, dropped columns, views, non-public schemas, partitioned
+tables or other out-of-scope features are silently erased. These require
+a full-catalog reconciliation and are rejected by the v1 projection.
+The final normalized result is validated through the existing STRICT host
+JSON Schema + cross-item admission boundary and deterministically sorted.
+
+**Important limits:** Both input objects are untrusted. An empty reported
+out-of-scope inventory CANNOT prove it is complete or independently captured.
+PostgreSQL OIDs/attnums and a cluster identifier are scoped to one database
+instance and may not survive dump/restore. The fixture does not attest a
+real catalog, discover constraints/RLS or establish full-database parity.
+No application actor receives DDL permissions and no migration manifest can
+authorize SQL execution.
+
+`tests/test_pg_catalog_projection_host.py` adds 27 host-only test methods,
+covering the checked-in fixture, stale/duplicate OID and attnum ledgers,
+non-ASCII names, source immutability, deterministic order, unsupported
+types, RLS, defaults and other out-of-scope objects. Source CI must now
+discover and execute at least 98 host methods in five suites; the actual
+runner must execute steps before any PASS claim. Native Oreslang, TypeSpec
+emission, PostgreSQL read-only extraction, DPM replay, actor/RLS lifecycle,
+locking, rollback and backend parity all remain separate release gates.
