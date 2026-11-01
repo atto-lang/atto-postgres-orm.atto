@@ -24,6 +24,8 @@ jobs:
           test "$(wc -l < ci/native-harness-cases.txt | tr -d ' ')" -eq 6
           test "$(grep -c '^fnc ' tests/native-harness-extended.ores)" -ge 6
           bash -n ci/verify-native-harness.sh
+          bash -n ci/verify-native-harness-receipts.sh ci/test-native-harness-receipts.sh
+          bash ci/test-native-harness-receipts.sh
           echo SOURCE_INVENTORY_ONLY_NO_GUEST_EXECUTION
   compiler-guest:
     # Self-hosted native runner runs only branch code from the source repository,
