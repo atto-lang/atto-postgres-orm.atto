@@ -12,6 +12,10 @@ from jsonschema import Draft202012Validator, ValidationError
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
+import sys
+sys.path.insert(0, str(ROOT / "scripts"))
+from orm_semantics_host import check_catalog_semantics, check_review_semantics
+
 
 def load(name):
     return json.loads((ROOT / name).read_text(encoding="utf-8"))
@@ -478,6 +482,67 @@ class CatalogContractTests(unittest.TestCase):
         ):
             self.assertIn(check, guest)
         self.assertIn("run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive", launcher)
+
+
+    def test_json_schema_shape_valid_but_duplicate_catalog_id_denied(self):
+        """JSON Schema describes items, not unique identities per table."""
+        check_catalog_semantics(self.current)
+        check_catalog_semantics(self.desired)
+        candidate = copy.deepcopy(self.current)
+        duplicate = copy.deepcopy(candidate["tables"][0]["columns"][0])
+        duplicate["name"] = "new_column"
+        candidate["tables"][0]["columns"].append(duplicate)
+        self.validator.validate(candidate)  # no unique-key rule in Draft 2020-12
+        with self.assertRaises(ValueError):
+            check_catalog_semantics(candidate)
+
+        candidate = copy.deepcopy(self.current)
+        duplicate_table = copy.deepcopy(candidate["tables"][0])
+        duplicate_table["stable_id"] = "different_stable_id"
+        candidate["tables"].append(duplicate_table)
+        self.validator.validate(candidate)  # same physical name, different identity
+        with self.assertRaises(ValueError):
+            check_catalog_semantics(candidate)
+
+    def test_json_schema_shape_valid_but_contradictory_review_denied(self):
+        """The native guest and host semantic oracle share fail-closed rules."""
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        original = load("contracts/examples/plan-preview.json")
+        check_review_semantics(original)
+        for operation in (
+            {"op": "review_type_change", "table_id": "labels",
+             "column_id": "name", "risk": "manual"},
+            {"op": "drop_column", "table_id": "labels",
+             "column_id": "name", "risk": "destructive"},
+        ):
+            candidate = copy.deepcopy(original)
+            candidate["steps"].append(operation)
+            validator.validate(candidate)  # individually valid, mutually conflicting
+            with self.assertRaises(ValueError):
+                check_review_semantics(candidate)
+
+        candidate = copy.deepcopy(original)
+        candidate["steps"] = [
+            {"op": "set_not_null", "table_id": "labels",
+             "column_id": "name", "risk": "preflight"},
+            {"op": "drop_not_null", "table_id": "labels",
+             "column_id": "name", "risk": "safe"},
+        ]
+        validator.validate(candidate)
+        with self.assertRaises(ValueError):
+            check_review_semantics(candidate)
+
+        candidate["steps"] = [
+            {"op": "review_table_rename", "table_id": "labels",
+             "column_id": "", "risk": "manual"},
+            {"op": "review_column_rename", "table_id": "labels",
+             "column_id": "name", "risk": "manual"},
+            {"op": "review_type_change", "table_id": "labels",
+             "column_id": "name", "risk": "manual"},
+        ]
+        validator.validate(candidate)
+        check_review_semantics(candidate)
 
 
 if __name__ == "__main__":
