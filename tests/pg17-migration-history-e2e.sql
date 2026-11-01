@@ -130,7 +130,7 @@ BEGIN
   -- A different digest for that abandoned version must be newly admissible;
   -- exercise it in a nested exception subtransaction, then undo the insert.
   BEGIN
-    got := record_migration(3, repeat('g',64));
+    got := record_migration(3, repeat('c',64));
     IF got <> 'APPLIED' THEN
       RAISE EXCEPTION 'RECOVERY_REPLAY_WAS_NOT_FRESH';
     END IF;
