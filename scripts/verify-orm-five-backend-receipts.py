@@ -116,10 +116,16 @@ def verify_receipts(manifest, directory, orm_head):
         modified = subprocess.check_output(
             ["git", "-C", str(ROOT), "status", "--porcelain", "--untracked-files=no"],
             stderr=subprocess.DEVNULL, text=True).strip()
+        untracked_source = subprocess.check_output(
+            ["git", "-C", str(ROOT), "ls-files", "--others", "--",
+             "src", "tests", "scripts"],
+            stderr=subprocess.DEVNULL, text=True).strip()
     except (OSError, subprocess.CalledProcessError) as error:
         raise ValueError("cannot attest local ORM Git checkout") from error
     require(actual_head == orm_head and modified == "",
             "ORM checkout head mismatch or tracked files modified")
+    require(untracked_source == "",
+            "ORM checkout has untracked or ignored guest/verification inputs")
     require(directory.is_dir() and not directory.is_symlink(),
             "receipt directory must be a real local directory")
     consistent = {}
