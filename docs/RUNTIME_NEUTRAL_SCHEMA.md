@@ -233,3 +233,28 @@ Neither the host validator nor the review preview is trusted migration
 authority. Full DPM catalog verification, peer TypeSpec semantic parity,
 native Oreslang compilation, and real PostgreSQL 17 tests remain blocked
 release gates.
+
+## Deterministic independent review-operation matrix (stage 7; host-only)
+
+`tests/test_orm_pairwise_matrix_host.py` exercises a separately authored
+operation-pair oracle over **all 100 ordered pairs** of the ten allowed v1
+operations across three scopes: same stable table and column, different
+stable tables, and distinct stable columns on one table (300 pair scenarios).
+It also permutes a legitimate five-operation review bundle across 80 fixed
+random seeds, verifies conflicts separated by dozens of unrelated steps,
+and detects duplicated operations separated by 150 other-table entries.
+These are host-only semantic tests, **not native Oreslang execution**.
+
+`scripts/orm_semantics_host.py` deliberately accepts shape-invalid
+inputs when invoked without JSON Schema validation. It is only a
+cross-item checker: callers must FIRST validate the closed v1 schema,
+including `approved=false`, operation-risk pairs and field bounds, then
+invoke the semantic checks. Neither successful host check creates a
+migration authorization or a database catalog attestation.
+
+The host workflow now requires at least 30 schema-contract, 8 semantic,
+and 10 independent matrix test methods. Missing/zero-discovered tests
+must not report a green host receipt. This suite cannot substitute for
+pinned native guest execution, TypeSpec emitter parity, a reviewed
+stable-ID mapping ledger, full PostgreSQL catalog introspection or DPM
+migration replay/rollback/locking evidence.
