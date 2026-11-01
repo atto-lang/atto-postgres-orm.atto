@@ -9,6 +9,8 @@ on:
       - 'scripts/verify-native-plans'
       - 'tests/test_schema_contract.py'
       - 'tests/pg17-catalog-readback-e2e.sql'
+      - 'tests/pg17-catalog-metadata-e2e.sql'
+      - 'tests/pg17-catalog-metadata-e2e.bash'
       - 'tests/pg17-catalog-readback-e2e.bash'
       - 'tests/pg17-migration-lock-e2e.bash'
       - 'tests/pg17-migration-lock-abort-e2e.bash'
