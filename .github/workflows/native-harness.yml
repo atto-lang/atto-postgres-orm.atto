@@ -1,0 +1,45 @@
+name: Native Oreslang six-case harness
+on:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  source-inventory:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify source inventory only (not guest evidence)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(grep -c 'new TestCase(' tests/native-harness-extended.ores)" -eq 6
+          test "$(wc -l < ci/native-harness-cases.txt | tr -d ' ')" -eq 6
+          test "$(grep -c '^fnc ' tests/native-harness-extended.ores)" -ge 6
+          bash -n ci/verify-native-harness.sh
+          echo SOURCE_INVENTORY_ONLY_NO_GUEST_EXECUTION
+  compiler-guest:
+    # Self-hosted native runner runs only branch code from the source repository,
+    # never untrusted forks. The verifier checks the exact SHA and pinned compiler bytes.
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, linux, x64, oreslang-jdk25]
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          persist-credentials: false
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Exact-head native Oreslang compile and six-case execution
+        shell: bash
+        env:
+          EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          ORESLANG_BIN: ${{ vars.ORESLANG_GRAAL_BIN }}
+          ORESLANG_COMPILER_SHA256: ${{ vars.ORESLANG_GRAAL_SHA256 }}
+        run: bash ci/verify-native-harness.sh
