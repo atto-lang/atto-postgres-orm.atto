@@ -89,5 +89,20 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn('"ores.orm.catalog/v1"', tsp)
 
 
+    def test_codegen_guest_contract_source_only(self):
+        """Source shape only; not compiler execution or generated Oreslang parse."""
+        source = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/schema-plans.ores").read_text(encoding="utf-8")
+        self.assertIn("pub fnc table_descriptor_source_preview_checked(", source)
+        self.assertIn("pub fnc model_source_preview_checked(", source)
+        self.assertIn('if column.nullable then', source)
+        self.assertIn('if native_type == "" then', source)
+        self.assertIn("if !admitted_name(model_name) then", source)
+        self.assertIn("if !admitted_name(member) then", source)
+        self.assertIn("schema.model_source_preview_checked(rt borrow labels)", guest)
+        self.assertIn("UUID silently lowered to unvalidated string", guest)
+        self.assertIn("public-constructor forged identifier entered codegen", guest)
+
+
 if __name__ == "__main__":
     unittest.main()

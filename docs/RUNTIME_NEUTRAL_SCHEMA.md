@@ -92,3 +92,38 @@ Release blocks: canonical source parity, stable-id ledger and ambiguity
 handling, full-catalog coverage, live PostgreSQL 17 introspection/diff/apply
 (including RLS, locks and rollback), prepared driver binds, actor leases and
 transaction lifecycle, and exact-head native Oreslang CI on JDK 25.
+
+
+## Pure Oreslang AOT source previews (stage 2, NOT certified)
+
+The existing stable-ID schema module now exposes
+\`schema.table_descriptor_source_preview_checked\` and
+\`schema.model_source_preview_checked\`. They operate entirely in Oreslang,
+have no I/O or SQL execution, and revalidate publicly constructed schema
+tables. Source preview is deterministic for the same ordered validated input;
+it never asserts accepted TypeSpec/JSON parity or produces a publishable
+compiled artifact.
+
+The descriptor preview preserves *all* eight logical kind tags, stable IDs,
+physical names and nullability without rewriting a schema to SQL. A
+separate deliberately narrow nominal model preview supports **only**
+nonnullable \`string\` and \`boolean\` fields, yielding an Oreslang class with
+explicit \`pub val\` fields and a constructor. For example, a stable-id
+\`labels\` table becomes \`orm_labels\` with members \`field_label\` and
+\`field_enabled\`. Prefixing stable IDs distinguishes generated source names
+from reserved language tokens and avoids silently using mutable physical
+database names. Added prefixes are checked against the portable 63-byte
+limit; no truncation, collisions or silent renaming.
+
+Nullable/Option, UUID, integer-width, JSON, bytes and timestamp mappings
+are **fail-closed until their nominal Oreslang types and wire codecs exist**.
+In particular, UUID is never silently cast to \`string\`, and NULL is not
+silently converted to an omittable value. A production compiler integration
+must consume *admitted, exact-digest Contract IR* plus a reviewed DPM catalog,
+materialize generated files atomically, and independently compile them.
+No runtime ORM or user-supplied string can bless a source preview.
+
+\`tests/schema-plans.ores\` adds positive exact-source determinism and
+negative tests for wrong type mapping, nullable loss, prefix-length
+overflow, and forged public table objects. These are authored guest
+assertions until a pinned Oreslang compiler runs them.

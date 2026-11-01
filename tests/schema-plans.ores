@@ -100,6 +100,81 @@ pub routine main(): void {
   if !schema.diff_checked(rt borrow fabricated, rt borrow current_table).is_err() then
     panic("unvalidated direct-constructor schema admitted");
   fi
+
+  // AOT preview is never an authorization to publish or run generated code.
+  val label_result = schema.table_checked("labels", "labels", arr[
+    schema.column("label", "label", "string", false),
+    schema.column("enabled", "enabled", "boolean", false)
+  ]);
+  if label_result.is_err() then panic("preview table fixture rejected"); fi
+  val labels = label_result.unwrap();
+  val model_preview = schema.model_source_preview_checked(rt borrow labels);
+  if model_preview.is_err() then panic("simple nominal model preview rejected"); fi
+  if model_preview.unwrap() != "// ORESLANG_MODEL_PREVIEW_ONLY_NOT_AUTHORIZED\n"
+    + "pub define class orm_labels as\n"
+    + "  pub val string field_label;\n"
+    + "  pub val bool field_enabled;\n"
+    + "  pub constructor(string field_label, bool field_enabled) {\n"
+    + "    self.field_label = field_label;\n"
+    + "    self.field_enabled = field_enabled;\n"
+    + "  }\nend\n" then
+    panic("nominal model preview source drift");
+  fi
+  val model_repeated = schema.model_source_preview_checked(rt borrow labels);
+  if model_repeated.is_err() || model_repeated.unwrap() != model_preview.unwrap() then
+    panic("nominal model preview not deterministic");
+  fi
+  val descriptor_preview = schema.table_descriptor_source_preview_checked(rt borrow labels);
+  if descriptor_preview.is_err() then panic("neutral descriptor source rejected"); fi
+  if descriptor_preview.unwrap() !=
+    "schema.table_checked(\"labels\", \"labels\", arr["
+    + "schema.column(\"label\", \"label\", \"string\", false), "
+    + "schema.column(\"enabled\", \"enabled\", \"boolean\", false)])" then
+    panic("stable-ID descriptor source drift");
+  fi
+  val nullable_table = schema.table_checked("labels", "labels", arr[
+    schema.column("label", "label", "string", true)
+  ]);
+  if nullable_table.is_err() then panic("nullable preview fixture rejected"); fi
+  val nullable_value = nullable_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow nullable_value).is_err() then
+    panic("nullable field erased into nonnullable source");
+  fi
+  val uuid_table = schema.table_checked("ids", "ids", arr[
+    schema.column("id", "id", "uuid", false)
+  ]);
+  if uuid_table.is_err() then panic("UUID preview fixture rejected"); fi
+  val uuid_value = uuid_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow uuid_value).is_err() then
+    panic("UUID silently lowered to unvalidated string");
+  fi
+  val too_long_table = schema.table_checked(
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "labels", arr[schema.column("id", "id", "string", false)]);
+  if too_long_table.is_err() then panic("valid long source stable ID rejected"); fi
+  val too_long = too_long_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow too_long).is_err() then
+    panic("oversized generated model identifier accepted");
+  fi
+  val too_long_field = schema.table_checked("labels", "labels", arr[
+    schema.column("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "label", "string", false)
+  ]);
+  if too_long_field.is_err() then panic("valid long column stable ID rejected"); fi
+  val too_long_field_value = too_long_field.unwrap();
+  if !schema.model_source_preview_checked(rt borrow too_long_field_value).is_err() then
+    panic("oversized generated member identifier accepted");
+  fi
+  val forged_codegen = new SchemaTable("labels", "unsafe;DROP", arr[
+    schema.column("label", "label", "string", false)
+  ]);
+  if !schema.model_source_preview_checked(rt borrow forged_codegen).is_err() then
+    panic("public-constructor forged identifier entered codegen");
+  fi
+  if !schema.table_descriptor_source_preview_checked(rt borrow forged_codegen).is_err() then
+    panic("public-constructor forged identifier entered source descriptor");
+  fi
+
   stdio.println("Pure Oreslang schema-diff planning contracts passed");
   return;
 }

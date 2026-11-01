@@ -192,4 +192,72 @@ define module schema as
     }
     return Ok(new SchemaPlan(steps));
   }
+
+  // Source-code generation is a preview only, not authority admission.
+  // Consumers MUST independently verify the TypeSpec/JSON Schema parity
+  // receipt, accepted catalog overlay and actual Oreslang compilation.
+  // Stable IDs, not SQL display names, determine generated field identities.
+  pub fnc table_descriptor_source_preview_checked(borrow SchemaTable table): Result<string, string> {
+    if table_checked(table.stable_id, table.name, table.columns()).is_err() then
+      return Err("unadmitted table for source preview");
+    fi
+    let string source = "schema.table_checked(\"" + table.stable_id + "\", \""
+      + table.name + "\", arr[";
+    let bool first = true;
+    for (val column of table.columns()) {
+      if !first then source = source + ", "; fi
+      first = false;
+      let string nullable_literal = "false";
+      if column.nullable then nullable_literal = "true"; fi
+      source = source + "schema.column(\"" + column.stable_id + "\", \""
+        + column.name + "\", \"" + column.kind + "\", " + nullable_literal + ")";
+    }
+    source = source + "])";
+    return Ok(source);
+  }
+
+  // Narrow but *nominal* Oreslang row-class preview. Only nonnullable
+  // string/boolean columns are currently lowered. UUID, JSON, integer,
+  // timestamp, bytes and nullable values need reviewed nominal/Option<T>
+  // representations and codecs; never quietly erase their distinctions.
+  // The return is plain source TEXT and confers no trusted codegen receipt.
+  pub fnc model_source_preview_checked(borrow SchemaTable table): Result<string, string> {
+    if table_checked(table.stable_id, table.name, table.columns()).is_err() then
+      return Err("unadmitted table for nominal model preview");
+    fi
+    val model_name = "orm_" + table.stable_id;
+    if !admitted_name(model_name) then
+      return Err("generated model identity exceeds portable identifier boundary");
+    fi
+    let string declarations = "";
+    let string parameters = "";
+    let string assignments = "";
+    let bool first = true;
+    for (val column of table.columns()) {
+      if column.nullable then
+        return Err("nullable generated model requires reviewed Option type mapping");
+      fi
+      let string native_type = "";
+      if column.kind == "string" then native_type = "string"; fi
+      if column.kind == "boolean" then native_type = "bool"; fi
+      if native_type == "" then
+        return Err("nominal guest type or codec mapping not implemented");
+      fi
+      val member = "field_" + column.stable_id;
+      if !admitted_name(member) then
+        return Err("generated member identity exceeds portable identifier boundary");
+      fi
+      if !first then parameters = parameters + ", "; fi
+      first = false;
+      declarations = declarations + "  pub val " + native_type + " " + member + ";\n";
+      parameters = parameters + native_type + " " + member;
+      assignments = assignments + "    self." + member + " = " + member + ";\n";
+    }
+    val output = "// ORESLANG_MODEL_PREVIEW_ONLY_NOT_AUTHORIZED\n"
+      + "pub define class " + model_name + " as\n"
+      + declarations
+      + "  pub constructor(" + parameters + ") {\n"
+      + assignments + "  }\nend\n";
+    return Ok(output);
+  }
 end
