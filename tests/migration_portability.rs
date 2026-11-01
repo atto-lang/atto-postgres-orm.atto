@@ -162,3 +162,22 @@ fn python_host_suites_are_not_mislabeled_as_rust_parity() {
     assert!(POLICY.contains("do not count the new"));
     assert!(POLICY.contains("Python"));
 }
+
+
+#[test]
+fn portable_oreslang_risk_metamorphic_oracles_are_required() {
+    // Static registration guard only. The Oreslang guests require native
+    // source compilation and execution before any target is marked passing.
+    for marker in [
+        "permuted safe count drift",
+        "permuted destructive count drift",
+        "repeat risk summary became nondeterministic",
+        "manual rename became nonblocking",
+        "preflight plan became nonblocking",
+        "forged preflight downgrade admitted",
+        "forged rename downgrade admitted",
+    ] {
+        assert!(GUEST.contains(marker), "missing native Oreslang oracle: {marker}");
+    }
+    assert!(VERIFIER.contains("run_guest schema-invariants"));
+}

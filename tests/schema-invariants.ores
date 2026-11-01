@@ -162,6 +162,62 @@ pub routine main(): void {
     new SchemaStep("add_nullable_column","alpha;DROP","key","safe")
   ]);
   if !schema.risk_summary_checked(rt borrow forged_identity).is_err() then panic("invalid identity risk summary admitted"); fi
+  // Metamorphic risk-summary parity: permuting a valid review plan must
+  // preserve all four risk counts while never authorizing execution.
+  val reordered_risks = new SchemaPlan(arr[
+    new SchemaStep("drop_column","alpha","key","destructive"),
+    new SchemaStep("review_create_table","beta","","manual"),
+    new SchemaStep("set_not_null","alpha","state","preflight"),
+    new SchemaStep("drop_not_null","alpha","key","safe")
+  ]);
+  val reordered_summary = schema.risk_summary_checked(rt borrow reordered_risks);
+  if reordered_summary.is_err() then panic("permuted risk summary rejected"); fi
+  if reordered_summary.unwrap().safe_count != 1 then panic("permuted safe count drift"); fi
+  if reordered_summary.unwrap().preflight_count != 1 then panic("permuted preflight count drift"); fi
+  if reordered_summary.unwrap().manual_count != 1 then panic("permuted manual count drift"); fi
+  if reordered_summary.unwrap().destructive_count != 1 then panic("permuted destructive count drift"); fi
+  if !reordered_risks.has_blockers() then panic("permuted destructive plan not blocked"); fi
+  val reordered_preview = schema.review_manifest_preview_checked(rt borrow reordered_risks);
+  if reordered_preview.is_err() then panic("permuted review manifest rejected"); fi
+  if reordered_preview.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == reordered_preview.unwrap() then
+    panic("permuted review status disappeared");
+  fi
+  val safe_replay_summary = schema.risk_summary_checked(rt borrow safe_plan);
+  if safe_replay_summary.is_err() then panic("repeat safe summary rejected"); fi
+  if safe_replay_summary.unwrap().safe_count != safe_summary.unwrap().safe_count then
+    panic("repeat risk summary became nondeterministic");
+  fi
+  // Single-step manual and preflight plans must block despite being reviewable.
+  val rename_only = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","alpha","","manual")
+  ]);
+  val rename_summary = schema.risk_summary_checked(rt borrow rename_only);
+  if rename_summary.is_err() then panic("manual rename summary rejected"); fi
+  if rename_summary.unwrap().manual_count != 1 then panic("manual rename risk count wrong"); fi
+  if rename_summary.unwrap().safe_count != 0 then panic("manual rename treated as safe"); fi
+  if !rename_only.has_blockers() then panic("manual rename became nonblocking"); fi
+  val preflight_only = new SchemaPlan(arr[
+    new SchemaStep("set_not_null","alpha","state","preflight")
+  ]);
+  val preflight_summary = schema.risk_summary_checked(rt borrow preflight_only);
+  if preflight_summary.is_err() then panic("preflight summary rejected"); fi
+  if preflight_summary.unwrap().preflight_count != 1 then panic("preflight count wrong"); fi
+  if !preflight_only.has_blockers() then panic("preflight plan became nonblocking"); fi
+  // Untrusted operation/risk combinations must fail even if labels appear safe.
+  val forged_preflight_safe = new SchemaPlan(arr[
+    new SchemaStep("set_not_null","alpha","state","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_preflight_safe).is_err() then
+    panic("forged preflight downgrade admitted");
+  fi
+  val forged_rename_safe = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","alpha","","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_rename_safe).is_err() then
+    panic("forged rename downgrade admitted");
+  fi
+  if !forged_preflight_safe.has_blockers() then panic("forged preflight marked nonblocking"); fi
+  if !forged_rename_safe.has_blockers() then panic("forged rename marked nonblocking"); fi
   stdio.println("Pure Oreslang schema invariant and metamorphic contracts passed");
   return;
 }
