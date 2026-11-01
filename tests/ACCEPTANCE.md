@@ -386,3 +386,51 @@ PostgreSQL driver correctness, actor/tenant ownership, or full-catalog
 migration authorization. The migration ledger is an isolated SQL reference,
 not a production migration tool, a real file hash attestation or a green
 release gate.
+
+
+## Additional migration recovery and rollback-lock E2E (authored; PG17 not run)
+
+The PostgreSQL 17 SQL-only history fixture now tests a failed migration's
+savepoint rollback, including:
+- A transient version-3 application followed by identical-digest replay.
+- Discard of its ledger row using `ROLLBACK TO SAVEPOINT`.
+- Proof that the discarded version is missing and total rows return to two.
+- A fresh retry with a *different valid hexadecimal digest*, undone within
+  an exception subtransaction, leaving the ledger unchanged.
+The outer fixture still has exactly one final `ROLLBACK` and the same
+seven-line test receipt. The recovery checks do not hash real migration
+files, and they do not implement a production migration engine.
+
+New `tests/pg17-migration-lock-abort-e2e.bash` is registered beside the
+existing commit-lock E2E in both CI workflows. It opens two independently
+connected PostgreSQL clients, requires transaction advisory-lock contention,
+and checks that a `ROLLBACK` releases the lock. The original script
+independently checks the `COMMIT` release path.
+
+**Exact-source, executed host evidence:** both local lock scripts matched
+their exact GitHub blob SHAs:
+`deb83d7d50641af6eafb9e90b2fac7d98386fc3d` (commit)
+and `6f24ea264b89313367f15ca70c12583771ecb04b` (rollback).
+Both passed `bash -n`. An isolated fake-`psql` process test executed
+**8/8 passing host-fault scenarios**: one normal mocked path plus
+holder-process failure, malformed try-lock output and unreleased lock,
+for each transaction ending. A race in the mock was detected and fixed
+by synchronizing with the fake holder's startup marker before fault
+injection. This is **NOT** a PostgreSQL 17 runtime pass.
+
+Fourteen source-only consistency checks passed on the exact GitHub
+blobs (balanced dollar-quoted blocks, one outer ROLLBACK, savepoint
+recovery guards, canonical retry digest, transactional lock primitives,
+CI registration, fake-holder synchronization, and unique Python method
+names). `tests/test_schema_contract.py` contains **50 authored test
+methods**, including executable host lock-mutation tests and source-level
+recovery assertions.
+
+**Still unverified:** genuine PostgreSQL 17 execution; the full
+official Python/jsonschema test suite; pinned native Oreslang compiler
+and guest execution; full TypeSpec/JSON Schema peer contract equivalence,
+DPM full-catalog changes, production-safe migration admission, and
+cross-backend actor/driver conformance. The source GitHub Actions
+admission problem has not been resolved; a zero-step job is neither a
+test failure nor a passing test. Do not transfer private source across
+organizations while the unresolved source-exposure incident is open.
