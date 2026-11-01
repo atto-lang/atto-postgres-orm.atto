@@ -648,5 +648,237 @@ class CatalogContractTests(unittest.TestCase):
                        "tests/pg17-migration-lock-e2e.bash"):
             self.assertIn(script, workflow)
 
+    def test_catalog_nested_unknown_fields_and_missing_keys(self):
+        """Host-only closed-envelope regression, no SQL/DDL interpretation."""
+        selectors = (
+            ("catalog", lambda doc: doc, ("schema_version", "tables")),
+            ("table", lambda doc: doc["tables"][0], ("stable_id", "name", "columns")),
+            ("column", lambda doc: doc["tables"][0]["columns"][0],
+             ("stable_id", "name", "kind", "nullable")),
+        )
+        for level, select, required in selectors:
+            with self.subTest(level=level, mutation="unknown-field"):
+                candidate = copy.deepcopy(self.current)
+                select(candidate)["migration_sql"] = "DROP TABLE users"
+                with self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+            for field in required:
+                with self.subTest(level=level, mutation="missing", field=field):
+                    candidate = copy.deepcopy(self.current)
+                    del select(candidate)[field]
+                    with self.assertRaises(ValidationError):
+                        self.validator.validate(candidate)
+
+
+    def test_catalog_scalar_type_confusion_is_not_coerced(self):
+        """JSON booleans, numbers, arrays and null cannot masquerade as text."""
+        probes = (
+            (lambda d: d, "schema_version", (None, 0, False, [], {})),
+            (lambda d: d["tables"][0], "stable_id", (None, 0, True, [], {})),
+            (lambda d: d["tables"][0], "name", (None, 1, False, [], {})),
+            (lambda d: d["tables"][0]["columns"][0], "kind",
+             (None, 0, False, [], {}, "UUID", "text")),
+            (lambda d: d["tables"][0]["columns"][0], "nullable",
+             (None, 0, 1, "true", "false", [], {})),
+        )
+        for select, field, values in probes:
+            for value in values:
+                with self.subTest(field=field, value=repr(value)):
+                    candidate = copy.deepcopy(self.current)
+                    select(candidate)[field] = value
+                    with self.assertRaises(ValidationError):
+                        self.validator.validate(candidate)
+
+
+    def test_identifier_bypass_matrix_at_every_catalog_level(self):
+        """Every schema identity slot rejects control, confusable and SQL shapes."""
+        bad = (
+            "", "9start", "with space", "a.b", "a/b", "a-b", "a|b",
+            "a\\x00b", "a\\nb", "a\\tb", "a\\x7fb", "é", "e\\u0301",
+            "ｕsers", "a\\u200db", "a\\u202eb", "a;DROP", "a\\\"b",
+            "a" * 64,
+        )
+        selectors = (
+            (lambda d: d["tables"][0], "stable_id"),
+            (lambda d: d["tables"][0], "name"),
+            (lambda d: d["tables"][0]["columns"][0], "stable_id"),
+            (lambda d: d["tables"][0]["columns"][0], "name"),
+        )
+        for select, field in selectors:
+            for value in bad:
+                with self.subTest(field=field, bad=repr(value)):
+                    candidate = copy.deepcopy(self.current)
+                    select(candidate)[field] = value
+                    with self.assertRaises(ValidationError):
+                        self.validator.validate(candidate)
+            for value in ("_", "A_0", "x" * 63):
+                with self.subTest(field=field, good=value[:12]):
+                    candidate = copy.deepcopy(self.current)
+                    select(candidate)[field] = value
+                    self.validator.validate(candidate)
+
+
+    def test_structural_schema_does_not_certify_identity_uniqueness(self):
+        """Duplicate IDs/names need the native checked-catalog admission gate.
+
+        JSON Schema v1 is a structural envelope, not a stable-ID reconciliation
+        ledger. If it accepts a duplicate, demand explicit native rejection
+        code; an accepted JSON fixture must never become a migration approval.
+        """
+        base = self.current
+        duplicates = []
+        for field in ("stable_id", "name"):
+            candidate = copy.deepcopy(base)
+            second = copy.deepcopy(candidate["tables"][0])
+            second[field] = candidate["tables"][0][field]
+            second["stable_id" if field == "name" else "name"] = "distinct"
+            candidate["tables"].append(second)
+            duplicates.append(("table-" + field, candidate))
+        for field in ("stable_id", "name"):
+            candidate = copy.deepcopy(base)
+            second = copy.deepcopy(candidate["tables"][0]["columns"][0])
+            second[field] = candidate["tables"][0]["columns"][0][field]
+            second["stable_id" if field == "name" else "name"] = "distinct"
+            candidate["tables"][0]["columns"].append(second)
+            duplicates.append(("column-" + field, candidate))
+        native = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
+        guards = (
+            "duplicate catalog table stable identity",
+            "duplicate catalog physical table name",
+            "duplicate schema column stable id",
+            "duplicate schema column name",
+        )
+        for (kind, candidate), guard in zip(duplicates, guards):
+            with self.subTest(kind=kind):
+                # If future JSON Schema adds a uniqueness extension, this
+                # assertion is still valid: native admission must remain.
+                self.assertIn(guard, native)
+                if self.validator.is_valid(candidate):
+                    self.assertIn("pub fnc catalog_checked(", native)
+                    self.assertIn("pub fnc table_checked(", native)
+
+
+    def test_unmodelled_database_objects_are_not_catalog_authority(self):
+        """v1 cannot authorize dropping PostgreSQL objects it cannot express."""
+        self.validator.validate({"schema_version": "ores.orm.catalog/v1", "tables": []})
+        for level, key in (
+            ("catalog", "roles"), ("catalog", "permissions"),
+            ("table", "primary_key"), ("table", "indexes"),
+            ("table", "foreign_keys"), ("table", "policies"),
+            ("table", "rls_enabled"), ("column", "default"),
+            ("column", "generated"), ("column", "sql_type"),
+        ):
+            with self.subTest(level=level, key=key):
+                candidate = copy.deepcopy(self.current)
+                target = (candidate if level == "catalog" else
+                          candidate["tables"][0] if level == "table" else
+                          candidate["tables"][0]["columns"][0])
+                target[key] = "trusted?"
+                with self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+
+
+    def test_review_preview_rejects_approval_and_sql_capability_fields(self):
+        """Reject injected authority at manifest and step levels."""
+        validator = Draft202012Validator(load("contracts/orm-plan-preview.schema.json"))
+        base = load("contracts/examples/plan-preview.json")
+        for key, value in (
+            ("sql", "DROP TABLE users"), ("approval", "operator"),
+            ("approved_by", "admin"), ("checksum", "forged"),
+            ("migration_role", "postgres"), ("execution_token", "yes"),
+            ("rollback_sql", "SELECT 1"), ("drift_accepted", True),
+        ):
+            for level in ("manifest", "step"):
+                with self.subTest(level=level, key=key):
+                    candidate = copy.deepcopy(base)
+                    target = (candidate if level == "manifest" else
+                              candidate["steps"][0])
+                    target[key] = value
+                    with self.assertRaises(ValidationError):
+                        validator.validate(candidate)
+        for field, values in (
+            ("approved", (True, None, 0, 1, "false", [], {})),
+            ("status", ("APPROVED", "APPLY", "", 0, None)),
+            ("scope", ("full_catalog", "sql", "", None, 0)),
+        ):
+            for value in values:
+                with self.subTest(field=field, value=repr(value)):
+                    candidate = copy.deepcopy(base)
+                    candidate[field] = value
+                    with self.assertRaises(ValidationError):
+                        validator.validate(candidate)
+
+
+    def test_review_preview_step_type_and_required_field_matrix(self):
+        validator = Draft202012Validator(load("contracts/orm-plan-preview.schema.json"))
+        base = load("contracts/examples/plan-preview.json")
+        for field in ("op", "table_id", "column_id", "risk"):
+            candidate = copy.deepcopy(base)
+            del candidate["steps"][0][field]
+            with self.subTest(missing=field), self.assertRaises(ValidationError):
+                validator.validate(candidate)
+        for field in ("op", "table_id", "column_id", "risk"):
+            for value in (None, False, 0, [], {}):
+                candidate = copy.deepcopy(base)
+                candidate["steps"][0][field] = value
+                with self.subTest(field=field, value=repr(value)):
+                    with self.assertRaises(ValidationError):
+                        validator.validate(candidate)
+        # All table-scoped operations forbid a synthetic column ID.
+        for op, risk in (("review_table_rename", "manual"),
+                         ("review_create_table", "manual"),
+                         ("review_drop_table", "destructive")):
+            candidate = copy.deepcopy(base)
+            candidate["steps"] = [{"op": op, "table_id": "docs",
+                                   "column_id": "forged", "risk": risk}]
+            with self.subTest(op=op), self.assertRaises(ValidationError):
+                validator.validate(candidate)
+
+
+    def test_safe_risk_never_promotes_review_preview(self):
+        """Even risk=safe remains a stopped, non-executable proposal."""
+        validator = Draft202012Validator(load("contracts/orm-plan-preview.schema.json"))
+        for op in ("add_nullable_column", "drop_not_null"):
+            candidate = {
+                "schema": "ores.orm.plan-preview/v1",
+                "status": "STOPPED_FOR_EVALUATION",
+                "approved": False,
+                "scope": "column_shapes_only",
+                "steps": [{"op": op, "table_id": "docs",
+                           "column_id": "field", "risk": "safe"}],
+            }
+            with self.subTest(op=op):
+                validator.validate(candidate)
+                promoted = copy.deepcopy(candidate)
+                promoted["approved"] = True
+                with self.assertRaises(ValidationError):
+                    validator.validate(promoted)
+                promoted = copy.deepcopy(candidate)
+                promoted["status"] = "APPROVED"
+                with self.assertRaises(ValidationError):
+                    validator.validate(promoted)
+
+
+    def test_contract_schemas_only_use_local_references(self):
+        """Validation must not require fetching arbitrary remote schema refs."""
+        for path in ("contracts/orm-catalog.schema.json",
+                     "contracts/orm-plan-preview.schema.json"):
+            schema = load(path)
+            Draft202012Validator.check_schema(schema)
+            self.assertEqual(schema["$schema"],
+                             "https://json-schema.org/draft/2020-12/schema")
+            def walk(value):
+                if isinstance(value, dict):
+                    if "$ref" in value:
+                        self.assertTrue(value["$ref"].startswith("#/$defs/"),
+                                        (path, value["$ref"]))
+                    for nested in value.values():
+                        walk(nested)
+                elif isinstance(value, list):
+                    for nested in value:
+                        walk(nested)
+            walk(schema)
+
+
 if __name__ == "__main__":
     unittest.main()
