@@ -952,7 +952,9 @@ class CatalogContractTests(unittest.TestCase):
             env["PATH"] = str(directory) + os.pathsep + env.get("PATH", "")
             env["PG_TEST_DSN"] = "postgresql://invalid/db"
             env["PG_TEST_DISPOSABLE"] = "I_ACKNOWLEDGE_DISPOSABLE_DATABASE"
-            expected = "APPLIED\\nREPLAY_OK\\nAPPLIED\\n2\\n1\\nPG17_MIGRATION_HISTORY_E2E_OK\\n0"
+            sep = chr(10)
+            expected = sep.join(("APPLIED", "REPLAY_OK", "APPLIED", "2", "1",
+                                 "PG17_MIGRATION_HISTORY_E2E_OK", "0"))
             script = str(ROOT / "tests/pg17-migration-history-e2e.bash")
             for version in ("160001", "180001", "seventeen", "17"):
                 env["PG_MOCK_VERSION"] = version
@@ -965,9 +967,9 @@ class CatalogContractTests(unittest.TestCase):
             env["PG_MOCK_VERSION"] = "170001"
             for label, receipt, code in (
                 ("correct-mock", expected, 0),
-                ("missing-replay", expected.replace("REPLAY_OK\\n", ""), 1),
-                ("truncated", expected.rsplit("\\n", 1)[0], 1),
-                ("wrong-count", expected.replace("\\n2\\n1\\n", "\\n3\\n1\\n"), 1),
+                ("missing-replay", expected.replace("REPLAY_OK" + sep, ""), 1),
+                ("truncated", expected.rsplit(sep, 1)[0], 1),
+                ("wrong-count", expected.replace(sep + "2" + sep + "1" + sep, sep + "3" + sep + "1" + sep), 1),
                 ("unexpected-success", "APPROVED", 1),
             ):
                 env["PG_MOCK_RECEIPT"] = receipt
