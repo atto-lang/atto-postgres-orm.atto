@@ -1,0 +1,61 @@
+{
+  "schema": "ores.orm.five-backend-gate/v1",
+  "status": "NOT_VERIFIED",
+  "policy": {
+    "source_transfer": "source-local-only",
+    "test_type": "compiled-native-oreslang-guest",
+    "schema_only_is_not_parity": true,
+    "negative_execution_is_not_parity": true,
+    "require_exact_source": true,
+    "require_compiler_provenance": true,
+    "require_all_backends": true
+  },
+  "backends": [
+    "java",
+    "llvm",
+    "wasm",
+    "cranelift",
+    "net"
+  ],
+  "required_sources": [
+    "src/schema.ores",
+    "src/pg.ores"
+  ],
+  "cases": [
+    {
+      "id": "typed-ddl-planner",
+      "source": "tests/plans.ores",
+      "expected_stdout": "Postgres SQL planning contracts passed\n"
+    },
+    {
+      "id": "neutral-schema-planner",
+      "source": "tests/schema-plans.ores",
+      "expected_stdout": "Pure Oreslang schema-diff planning contracts passed\n"
+    },
+    {
+      "id": "adversarial-schema",
+      "source": "tests/schema-adversarial.ores",
+      "expected_stdout": "Pure Oreslang adversarial schema contracts passed\n"
+    },
+    {
+      "id": "invariant-schema",
+      "source": "tests/schema-invariants.ores",
+      "expected_stdout": "Pure Oreslang schema invariant and metamorphic contracts passed\n"
+    }
+  ],
+  "requirements": [
+    "real compiler or approved source interpreter must load unmodified native .ores",
+    "source import graph includes exact ORM src modules",
+    "guest must execute, not be skipped, mocked or host-language reimplemented",
+    "compiler and runner and produced guest artifact SHA256 hashes recorded",
+    "exact source SHA256, backend HEAD, exit code and stdout recorded",
+    "all 20 backend/case results must pass before full ORM planner parity"
+  ],
+  "known_limitations": {
+    "java": "Pinned JDK25 guest harness authored; no exact-head stepful execution for this ORM PR",
+    "llvm": "Full class/Result/Array/borrow ORM guest compile-and-execute evidence not established",
+    "wasm": "May delegate frontend to pinned LLVM; worker/runtime and ORM guest execution not established",
+    "cranelift": "Current stage-0 parser accepts scalar expressions only; classes, modules, arrays, Result and imports not implemented",
+    "net": "Managed structured scalar/nominal subset; full ORM guest execution and NativeAOT driver evidence not established"
+  }
+}
