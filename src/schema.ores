@@ -278,6 +278,70 @@ define module schema as
     return Ok(new SchemaPlan(steps));
   }
 
+
+  // A stable-ID *review* manifest, not a DPM plan and never a DDL capability.
+  // Public SchemaPlan/SchemaStep constructors are not authority: verify every
+  // op, risk and ID before any JSON is assembled. Strict ASCII identities
+  // cannot inject JSON syntax. The output always denies approval.
+  pub fnc review_manifest_preview_checked(borrow SchemaPlan plan): Result<string, string> {
+    val all_steps = plan.steps();
+    if all_steps.size > 2048 then return Err("too many review steps"); fi
+    let string output = "{\"schema\":\"ores.orm.plan-preview/v1\","
+      + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+      + "\"scope\":\"column_shapes_only\",\"steps\":[";
+    let bool first = true;
+    for (val step of all_steps) {
+      if !admitted_name(step.table_id) then
+        return Err("unadmitted review table stable ID");
+      fi
+      let bool table_op = false;
+      let string allowed_risk = "";
+      if step.op == "review_table_rename" then
+        table_op = true;
+        allowed_risk = "manual";
+      fi
+      if step.op == "review_create_table" then
+        table_op = true;
+        allowed_risk = "manual";
+      fi
+      if step.op == "review_drop_table" then
+        table_op = true;
+        allowed_risk = "destructive";
+      fi
+      if step.op == "review_column_rename" || step.op == "review_type_change" then
+        allowed_risk = "manual";
+      fi
+      if step.op == "drop_not_null" || step.op == "add_nullable_column" then
+        allowed_risk = "safe";
+      fi
+      if step.op == "set_not_null" || step.op == "add_required_column" then
+        allowed_risk = "preflight";
+      fi
+      if step.op == "drop_column" then
+        allowed_risk = "destructive";
+      fi
+      if allowed_risk == "" || step.risk != allowed_risk then
+        return Err("forged or inconsistent schema review operation");
+      fi
+      if table_op then
+        if step.column_id != "" then
+          return Err("table review operation supplied a column identity");
+        fi
+      else
+        if !admitted_name(step.column_id) then
+          return Err("unadmitted review column stable ID");
+        fi
+      fi
+      if !first then output = output + ","; fi
+      first = false;
+      output = output + "{\"op\":\"" + step.op + "\",\"table_id\":\""
+        + step.table_id + "\",\"column_id\":\"" + step.column_id
+        + "\",\"risk\":\"" + step.risk + "\"}";
+    }
+    output = output + "]}";
+    return Ok(output);
+  }
+
   // Source-code generation is a preview only, not authority admission.
   // Consumers MUST independently verify the TypeSpec/JSON Schema parity
   // receipt, accepted catalog overlay and actual Oreslang compilation.

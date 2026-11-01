@@ -147,3 +147,25 @@ cannot represent them. Both planners emit proposals only. Tests for
 duplicate/colliding table IDs, create/drop, forged public catalogs and
 array-copy isolation are authored in \`tests/schema-plans.ores\`; they still
 require a real Oreslang guest run.
+
+
+## Versioned, review-only migration handoff preview (stage 4)
+
+\`schema.review_manifest_preview_checked\` emits bounded, stable-ID JSON
+**data**, not SQL. Public \`SchemaStep\` constructors are revalidated
+against an exact operation→risk allowlist; table-only operations must have
+no column ID; all IDs must satisfy the conservative ASCII identifier
+policy. The output always includes
+\`"status":"STOPPED_FOR_EVALUATION"\`, \`"approved":false\` and
+\`"scope":"column_shapes_only"\`. The source text cannot be made an
+authorization token merely by receiving a \`safe\` operation.
+
+\`contracts/orm-plan-preview.schema.json\` is a closed Draft 2020-12
+structural schema for this review envelope and prohibits risk downgrades
+and unreviewed SQL. Its matching example and negative mutation tests
+are host-only; \`tests/schema-plans.ores\` includes exact output and
+adversarial guest checks. **Not a DPM migration plan**: DPM must bind
+approved peer-authority digests, complete desired/observed catalog
+identities, independent SQL candidates, engine/extension/version pins,
+execution lease, operator authorization and post-apply read-back before
+any actual migration is planned or applied.

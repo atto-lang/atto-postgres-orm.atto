@@ -1,0 +1,14 @@
+{
+  "schema": "ores.orm.plan-preview/v1",
+  "status": "STOPPED_FOR_EVALUATION",
+  "approved": false,
+  "scope": "column_shapes_only",
+  "steps": [
+    {
+      "op": "review_create_table",
+      "table_id": "labels",
+      "column_id": "",
+      "risk": "manual"
+    }
+  ]
+}

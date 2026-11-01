@@ -128,5 +128,32 @@ class CatalogContractTests(unittest.TestCase):
             self.assertIn(marker, guest)
 
 
+    def test_migration_review_manifest_only(self):
+        """Schema/negative inputs only, NOT DPM or pure Oreslang execution."""
+        schema = load("contracts/orm-plan-preview.schema.json")
+        Draft202012Validator.check_schema(schema)
+        validator = Draft202012Validator(schema)
+        approved = load("contracts/examples/plan-preview.json")
+        validator.validate(approved)
+        for name, mutate in (
+            ("attempt-approval", lambda p: p.update(approved=True)),
+            ("status-promotion", lambda p: p.update(status="proceed")),
+            ("unknown-step", lambda p: p["steps"][0].update(op="DROP TABLE users")),
+            ("risk-downgrade", lambda p: p["steps"][0].update(risk="safe")),
+            ("identifier-injection", lambda p: p["steps"][0].update(table_id='users";DROP')),
+            ("extra-sql", lambda p: p["steps"][0].update(sql="DELETE FROM users")),
+            ("wrong-table-scope", lambda p: p["steps"][0].update(column_id="payload")),
+        ):
+            with self.subTest(name=name):
+                candidate = copy.deepcopy(approved)
+                mutate(candidate)
+                with self.assertRaises(ValidationError):
+                    validator.validate(candidate)
+        source = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
+        self.assertIn("pub fnc review_manifest_preview_checked(", source)
+        self.assertIn("forged or inconsistent schema review operation", source)
+        self.assertIn("unadmitted review column stable ID", source)
+
+
 if __name__ == "__main__":
     unittest.main()

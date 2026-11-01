@@ -242,6 +242,55 @@ pub routine main(): void {
     panic("post-admission array mutation modified catalog");
   fi
 
+
+  // Review manifests are always non-authorizing, even for "safe" steps.
+  val created_plan = created.unwrap();
+  val emitted_manifest = schema.review_manifest_preview_checked(rt borrow created_plan);
+  if emitted_manifest.is_err() then panic("valid review manifest rejected"); fi
+  if emitted_manifest.unwrap() !=
+    "{\"schema\":\"ores.orm.plan-preview/v1\","
+    + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+    + "\"scope\":\"column_shapes_only\",\"steps\":["
+    + "{\"op\":\"review_create_table\",\"table_id\":\"labels\","
+    + "\"column_id\":\"\",\"risk\":\"manual\"}]}" then
+    panic("review manifest shape or approval status drift");
+  fi
+  val adversarial_sql = new SchemaPlan(arr[
+    new SchemaStep("DROP TABLE users", "users", "", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_sql).is_err() then
+    panic("forged SQL operation entered review manifest");
+  fi
+  val adversarial_risk = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "password", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_risk).is_err() then
+    panic("destructive operation risk was downgraded");
+  fi
+  val adversarial_id = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "bad\\\"id", "destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_id).is_err() then
+    panic("unescaped JSON injection identifier entered review manifest");
+  fi
+  val wrong_scope = new SchemaPlan(arr[
+    new SchemaStep("review_create_table", "users", "unexpected", "manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow wrong_scope).is_err() then
+    panic("table-only operation accepted a column identity");
+  fi
+  val actual_drop_plan = dropped.unwrap();
+  val dropped_manifest = schema.review_manifest_preview_checked(rt borrow actual_drop_plan);
+  if dropped_manifest.is_err() then panic("destructive review manifest rejected"); fi
+  if dropped_manifest.unwrap() !=
+    "{\"schema\":\"ores.orm.plan-preview/v1\","
+    + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+    + "\"scope\":\"column_shapes_only\",\"steps\":["
+    + "{\"op\":\"review_drop_table\",\"table_id\":\"labels\","
+    + "\"column_id\":\"\",\"risk\":\"destructive\"}]}" then
+    panic("destructive review manifest lost risk");
+  fi
+
   stdio.println("Pure Oreslang schema-diff planning contracts passed");
   return;
 }
