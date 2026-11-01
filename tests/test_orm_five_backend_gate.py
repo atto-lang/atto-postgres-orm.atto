@@ -37,6 +37,47 @@ class ParityReceiptAdmissionTests(unittest.TestCase):
         self.assertIn("table_checked", code)
         self.assertIn("DDL rendering drift", code)
 
+
+    def test_changed_guest_import_or_sentinel_blocks_manifest(self):
+        """A copied host shim cannot replace both native Oreslang imports."""
+        manifest = gate.load_manifest()
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            needed = (
+                ["contracts/orm-five-backend-gate.v1.json"]
+                + manifest["required_sources"]
+                + [case["source"] for case in manifest["cases"]]
+            )
+            for name in needed:
+                dst = root / name
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                dst.write_bytes((ROOT / name).read_bytes())
+            target = root / "tests/orm-cross-backend.ores"
+            good = target.read_text(encoding="utf-8")
+            with mock.patch.object(gate, "ROOT", root), mock.patch.object(
+                    gate, "MANIFEST", root / "contracts/orm-five-backend-gate.v1.json"):
+                self.assertEqual(len(gate.load_manifest()["cases"]), 5)
+                for label, modified in (
+                    ("lost-schema-import",
+                     good.replace("import module schema from '../src/schema';", "")),
+                    ("lost-PG-import",
+                     good.replace("import module pg from '../src/pg';", "")),
+                    ("spoofed-sentinel",
+                     good.replace("stdio.println(\"Pure Oreslang combined ORM portability contracts passed\")",
+                                  "stdio.println(\"FAKE PASS\")")),
+                ):
+                    with self.subTest(label=label):
+                        target.write_text(modified, encoding="utf-8")
+                        with self.assertRaisesRegex(ValueError, "ORM module|success oracle"):
+                            gate.load_manifest()
+                target.write_text(good, encoding="utf-8")
+                contract = root / "contracts/orm-five-backend-gate.v1.json"
+                data = json.loads(contract.read_text(encoding="utf-8"))
+                data["status"] = "VERIFIED"
+                contract.write_text(json.dumps(data), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "never self-certify"):
+                    gate.load_manifest()
+
     def test_ambiguous_or_non_json_receipts_are_not_json(self):
         for raw in (
             '{"backend":"java","backend":"llvm"}',
