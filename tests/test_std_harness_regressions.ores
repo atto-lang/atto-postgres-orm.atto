@@ -17,11 +17,27 @@ fnc query_values_remain_separate_from_sql(): TestOutcome {
     query.params.get(1) == "row-2",
     "workspace and ID must remain separately bound SQL parameters");
 }
+fnc not_null_column_is_explicit(): TestOutcome {
+  val result = pg.column("id", "uuid", false);
+  if result.is_err(); then return fail("supported uuid column rejected"); fi
+  return expect_equal_string(result.unwrap(), "\"id\" uuid NOT NULL",
+    "nonnullable column must emit NOT NULL");
+}
+
+fnc nullable_column_omits_not_null(): TestOutcome {
+  val result = pg.column("note", "text", true);
+  if result.is_err(); then return fail("supported nullable text column rejected"); fi
+  return expect_equal_string(result.unwrap(), "\"note\" text",
+    "nullable column must not include NOT NULL constraint");
+}
+
 pub routine main(): void {
   val TestSuite suite = new TestSuite("postgres-orm", arr[
     new TestCase("quoted_identifier_escapes_quotes", quoted_identifier_escapes_quotes, false, ""),
     new TestCase("unsupported_type_is_rejected", unsupported_type_is_rejected, false, ""),
-    new TestCase("query_values_remain_separate_from_sql", query_values_remain_separate_from_sql, false, "")
+    new TestCase("query_values_remain_separate_from_sql", query_values_remain_separate_from_sql, false, ""),
+    new TestCase("not_null_column_is_explicit", not_null_column_is_explicit, false, ""),
+    new TestCase("nullable_column_omits_not_null", nullable_column_omits_not_null, false, "")
   ]);
   val TestOptions options = new TestOptions("", false, true);
   val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
