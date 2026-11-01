@@ -5,6 +5,7 @@ on:
       - 'src/schema.ores'
       - 'tests/schema-plans.ores'
       - 'tests/schema-adversarial.ores'
+      - 'tests/schema-invariants.ores'
       - 'scripts/verify-native-plans'
       - 'tests/test_schema_contract.py'
       - 'contracts/**'
