@@ -1,0 +1,52 @@
+{
+  "schema": "ores.orm.storage-overlay/v1",
+  "status": "review_proposal_only",
+  "contractModel": "Ores.Orm.DocumentRow",
+  "databaseFamily": "postgresql",
+  "table": "docs",
+  "columns": [
+    {
+      "name": "workspace_id",
+      "typeFamily": "uuid",
+      "nullable": false
+    },
+    {
+      "name": "id",
+      "typeFamily": "uuid",
+      "nullable": false
+    },
+    {
+      "name": "title",
+      "typeFamily": "string",
+      "nullable": false
+    },
+    {
+      "name": "note",
+      "typeFamily": "string",
+      "nullable": true
+    }
+  ],
+  "primaryKey": [
+    "workspace_id",
+    "id"
+  ],
+  "tenantKey": "workspace_id",
+  "manualReviewRequired": [
+    "defaults",
+    "constraints",
+    "indexes",
+    "foreign_keys",
+    "rls_policies",
+    "grants",
+    "extensions",
+    "generated_expressions",
+    "collations"
+  ],
+  "migrationPolicy": {
+    "plannerAndApplier": "declarative-migrations",
+    "allowDirectOrmApply": false,
+    "allowAutoDropOrRename": false,
+    "requireExactObservedCatalog": true,
+    "requireIndependentAuthorityConvergence": true
+  }
+}
