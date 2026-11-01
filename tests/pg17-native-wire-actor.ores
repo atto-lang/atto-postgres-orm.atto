@@ -190,11 +190,11 @@ define actor PgWireProbe as
       state.phase = "complete";
       state.requests = state.requests + 1;
     });
+    let bool state_ok = false;
     self.handle_state(critical[read] |state| -> {
-      if state.phase != "complete" || state.requests != 1 then
-        panic("native PostgreSQL actor sealed state mismatch");
-      fi
+      state_ok = state.phase == "complete" && state.requests == 1;
     });
+    if !state_ok then panic("native PostgreSQL actor sealed state mismatch"); fi
 
     stdio.stdout.write("PG_NATIVE_ACTOR_WIRE_PASS");
     self.end();
