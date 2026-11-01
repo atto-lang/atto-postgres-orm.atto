@@ -86,6 +86,17 @@ def load_manifest():
         file = ROOT / name
         require(file.is_file() and not file.is_symlink(),
                 "missing or symlinked native source: " + name)
+    # Bind every guest to the REAL ORM module, not an unrelated arithmetic
+    # fixture whose matching stdout could be misreported as ORM parity.
+    for case in cases:
+        raw = (ROOT / case["source"]).read_text(encoding="utf-8")
+        module = "pg" if case["id"] == "typed-ddl-planner" else "schema"
+        edge = "import module " + module + " from '../src/" + module + "';"
+        require(edge in raw, "native guest no longer imports ORM module: "
+                + case["id"])
+        printed = 'stdio.println("' + case["expected_stdout"].strip() + '")'
+        require(printed in raw, "native guest success oracle missing: "
+                + case["id"])
     return manifest
 
 
