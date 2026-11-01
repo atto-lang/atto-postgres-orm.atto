@@ -258,3 +258,51 @@ must not report a green host receipt. This suite cannot substitute for
 pinned native guest execution, TypeSpec emitter parity, a reviewed
 stable-ID mapping ledger, full PostgreSQL catalog introspection or DPM
 migration replay/rollback/locking evidence.
+
+## Strict UTF-8 review-only JSON admission (stage 8; host-only)
+
+The new scripts/orm_admission_host.py is a **host-only**, read-only
+boundary for imported catalog and review JSON. Its fail-closed checks are:
+
+1. Accept exact UTF-8 bytes bounded at 8 MiB. Reject malformed JSON,
+   non-finite numeric constants, nested duplicate JSON keys (including
+   Unicode-escaped aliases), and excessive parser nesting.
+2. Validate the closed JSON Schema Draft 2020-12 envelope selected by a
+   fixed kind (catalog or review).
+3. Verify stable-ID and physical-name uniqueness and cross-step
+   contradictions via scripts/orm_semantics_host.py.
+
+Review-only examples (no database access or SQL):
+
+    python scripts/orm_admission_host.py --kind catalog --input contracts/examples/current.catalog.json
+    python scripts/orm_admission_host.py --kind review --input contracts/examples/plan-preview.json
+
+The CLI exits 0 only on admitted review data and 2 on an invalid payload
+or input-file I/O failure. A zero exit or ORM_HOST_REVIEW_ONLY_OK marker
+**never authorizes SQL generation, approval or migration execution.**
+This script contains no DB connection, DDL capability or SQL emitter.
+
+### Portable identifier boundary correction
+
+The original identifier ^...$ regex can match before a terminal newline,
+which the pure-Oreslang admitted_name implementation rejects. The JSON
+Schema catalog/preview and TypeSpec peer patterns now use an explicit
+end-of-input negative lookahead, rather than relying on the $ anchor;
+the optional empty column ID is also strictly anchored.
+
+Tests reject suffixes LF, CR, U+2028 and U+2029 for catalog table and
+column IDs/names and for review-step table/column IDs. This is a
+peer-contract modification: TypeSpec compiler/emitter equivalence remains
+a separate mandatory unverified gate.
+
+The 23 new admission-test methods cover CLI positive/negative behavior,
+duplicate keys, huge/deep inputs, review contradictions, forged approvals
+and portable identifier regressions. The host CI workflow now requires
+at least 71 discovered host test methods across four suites and exercises
+the checked-in catalog/preview JSON files through the CLI.
+
+None of these host results establishes pinned native Oreslang guest
+execution, TypeSpec/TJSV parity, PostgreSQL 17 introspection or DPM
+migration replay/rollback/locking. Do not transfer private source to
+an alternate organization while the existing incident hold applies.
+Keep changes in draft pending native and database execution evidence.
