@@ -8,6 +8,7 @@ on:
       - 'tests/schema-invariants.ores'
       - 'scripts/verify-native-plans'
       - 'tests/test_schema_contract.py'
+      - 'tests/test_catalog_differential_host.py'
       - 'contracts/**'
       - '.github/workflows/orm-schema-contract.yml'
   workflow_dispatch:
@@ -26,5 +27,7 @@ jobs:
         run: python -m pip install 'jsonschema==4.25.1'
       - name: Validate peer JSON Schema fixtures and hostile inputs
         run: python -m unittest discover -s tests -p 'test_schema_contract.py' -v
+      - name: Run deterministic independent structural oracles
+        run: python -m unittest discover -s tests -p 'test_catalog_differential_host.py' -v
       - name: Evidence boundary
         run: echo 'JSON_SCHEMA_HOST_ONLY: no TypeSpec semantic parity, Oreslang compiler, SQL or PostgreSQL tests executed'
