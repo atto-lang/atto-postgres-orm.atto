@@ -154,5 +154,25 @@ class Pg17OfflineProjectionTests(unittest.TestCase):
             project_capture(c, l)
 
 
+    def test_checked_in_offline_capture_and_ledger(self):
+        import json
+        root = pathlib.Path(__file__).resolve().parents[1]
+        c = json.loads((root / "contracts/examples/pg17-capture.offline.json").read_text("utf-8"))
+        l = json.loads((root / "contracts/examples/pg17-ledger.offline.json").read_text("utf-8"))
+        generated_c, generated_l = capture_and_ledger()
+        self.assertEqual(c, generated_c)
+        self.assertEqual(l, generated_l)
+        self.assertEqual(project_capture(c, l), project_capture(generated_c, generated_l))
+
+    def test_checked_in_fixture_rejects_unreviewed_rls_metadata(self):
+        import json
+        root = pathlib.Path(__file__).resolve().parents[1]
+        c = json.loads((root / "contracts/examples/pg17-capture.offline.json").read_text("utf-8"))
+        l = json.loads((root / "contracts/examples/pg17-ledger.offline.json").read_text("utf-8"))
+        c["tables"][0]["rls_enabled"] = True
+        with self.assertRaises(ProjectionError):
+            project_capture(c, l)
+
+
 if __name__ == "__main__":
     unittest.main()
