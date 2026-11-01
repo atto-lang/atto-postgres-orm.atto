@@ -8,6 +8,7 @@ on:
       - 'tests/schema-invariants.ores'
       - 'scripts/verify-native-plans'
       - 'tests/test_schema_contract.py'
+      - 'tests/test_catalog_differential_host.py'
       - 'tests/test_pg17_metadata_contract.py'
       - 'tests/pg17-catalog-readback-e2e.sql'
       - 'tests/pg17-catalog-metadata-e2e.sql'
