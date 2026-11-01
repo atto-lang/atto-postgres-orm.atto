@@ -183,8 +183,8 @@ define module pg as
   // data snapshot. Use these when the caller must keep using its Array.
   pub fnc constraint_unique_borrowed(borrow Array<string> columns): ConstraintSpec {
     let Array<string> copy = arr[];
-    for (val column_name of columns) {
-      copy.add(column_name);
+    for (let int index = 0; index < columns.size; index++) {
+      copy.add(columns.get(index));
     }
     return new ConstraintSpec("unique", copy, "", arr[]);
   }
@@ -197,12 +197,12 @@ define module pg as
     borrow Array<string> reference_columns
   ): ConstraintSpec {
     let Array<string> local_copy = arr[];
-    for (val column_name of columns) {
-      local_copy.add(column_name);
+    for (let int local_index = 0; local_index < columns.size; local_index++) {
+      local_copy.add(columns.get(local_index));
     }
     let Array<string> reference_copy = arr[];
-    for (val reference_name of reference_columns) {
-      reference_copy.add(reference_name);
+    for (let int reference_index = 0; reference_index < reference_columns.size; reference_index++) {
+      reference_copy.add(reference_columns.get(reference_index));
     }
     return new ConstraintSpec("foreign_key", local_copy, reference_table, reference_copy);
   }
@@ -374,8 +374,8 @@ define module pg as
     string sql, borrow Array<string> params
   ): QueryPlan {
     let Array<string> copy = arr[];
-    for (val param of params) {
-      copy.add(param);
+    for (let int index = 0; index < params.size; index++) {
+      copy.add(params.get(index));
     }
     return new QueryPlan(sql, copy);
   }
@@ -438,7 +438,8 @@ define module pg as
     fi
     if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
     let Array<DbValue> copy = arr[];
-    for (val value of values) {
+    for (let int index = 0; index < values.size; index++) {
+      val value = values.get(index);
       if !admitted_db_value(value) then
         return Err("unadmitted PostgreSQL bind value");
       fi
