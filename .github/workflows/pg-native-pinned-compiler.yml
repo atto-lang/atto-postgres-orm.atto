@@ -1,0 +1,80 @@
+name: Pinned Java compiler native PostgreSQL guests
+on:
+  push:
+    branches:
+      - ci/pg-native-pinned-compiler-20261031
+    paths:
+      - 'ci-pinned-compiler/**'
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/negative/**'
+permissions:
+  contents: read
+jobs:
+  native-pg-guests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - name: Set up GraalVM JDK 25
+        uses: graalvm/setup-graalvm@27b360dbb857524eaf0b4c4cef364d38e5b4f173 # v1
+        with:
+          version: '25.3'
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          cache: maven
+      - name: Verify exact pinned compiler blobs
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler=ci-pinned-compiler
+          test "$(cat "$compiler/PINNED_COMMIT")" = 87a52fa7af40d3541277764533f51850b4db22bd
+          test "$(wc -l < "$compiler/BLOBS.tsv")" -eq 89
+          while IFS=$'\t' read -r expected path; do
+            test -n "$expected"
+            test -n "$path"
+            actual="$(git hash-object "$compiler/$path")"
+            test "$actual" = "$expected" || { echo "blob mismatch: $path expected=$expected actual=$actual" >&2; exit 1; }
+          done < "$compiler/BLOBS.tsv"
+          java --version
+          mvn --version
+      - name: Clean build exact pinned compiler
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler=ci-pinned-compiler
+          mvn -B -ntp -f "$compiler/pom.xml" -Dmaven.test.skip=true clean package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt
+          test -s "$compiler/target/classpath.txt"
+          test -f "$compiler/target/classes/dev/oreslang/launcher/OresMain.class"
+      - name: Execute four native guest oracles
+        shell: bash
+        run: |
+          set -euo pipefail
+          compiler=ci-pinned-compiler
+          launcher=(java --enable-native-access=ALL-UNNAMED -p "$compiler/target/classes:$(cat "$compiler/target/classpath.txt")" -m dev.oreslang/dev.oreslang.launcher.OresMain)
+          run_positive() {
+            "${launcher[@]}" tests/plans.ores > /tmp/pg-positive.out 2> /tmp/pg-positive.err
+            test "$(cat /tmp/pg-positive.out)" = 'Postgres SQL planning contracts passed'
+          }
+          run_negative() {
+            label="$1"; source="$2"; marker="$3"; diagnostic="$4"
+            set +e
+            "${launcher[@]}" "$source" > "/tmp/$label.out" 2> "/tmp/$label.err"
+            rc=$?
+            set -e
+            test "$rc" -ne 0
+            test "$rc" -ne 69
+            test "$rc" -ne 126
+            test "$rc" -ne 127
+            test "$(cat "/tmp/$label.out")" = "$marker"
+            grep -Fq -- "$diagnostic" "/tmp/$label.err"
+          }
+          run_positive
+          run_negative empty-identifier tests/negative/empty_identifier.ores PG_NEGATIVE_EMPTY_IDENTIFIER_STARTED 'invalid PostgreSQL identifier surface'
+          run_negative empty-table tests/negative/empty_table.ores PG_NEGATIVE_EMPTY_TABLE_STARTED 'PostgreSQL table requires at least one column'
+          run_negative control-identifier tests/negative/control_identifier.ores PG_NEGATIVE_CONTROL_IDENTIFIER_STARTED 'invalid PostgreSQL identifier surface'
+          printf '%s\n' 'NATIVE_PG_FOUR_GUESTS_PASS'
