@@ -20,7 +20,7 @@ class WorkflowSafetyTests(unittest.TestCase):
         for file in files:
             lines = file.read_text(encoding="utf-8").splitlines()
             for index, line in enumerate(lines):
-                matched = re.match(r"^\s*-\s*uses:\s*(\S+)", line)
+                matched = re.match(r"^\s*(?:-\s*)?uses:\s*(\S+)", line)
                 if not matched:
                     continue
                 ref = matched.group(1)
