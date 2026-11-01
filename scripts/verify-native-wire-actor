@@ -1,0 +1,125 @@
+#!/usr/bin/env bash
+# Native Oreslang actor -> NIO -> PostgreSQL 17 wire verification.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+compiler="${ORESLANG_SOURCE_DIR:-$root/../oreslang-source.java}"
+java_bin="${ORES_JAVA:-java}"
+expected_orm="${EXPECTED_ORM_SHA:-}"
+dsn="${PG_TEST_DSN:-}"
+ack="${PG_TEST_DISPOSABLE:-}"
+evidence="${EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-native-wire.XXXXXXXX")}"
+
+fail() {
+  printf 'FAIL: %s\n' "$*" >&2
+  printf 'NOT_VERIFIED: %s\n' "$*" > "$evidence/RESULT.txt"
+  exit 1
+}
+require() { command -v "$1" >/dev/null 2>&1 || fail "required command missing: $1"; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1";
+  else shasum -a 256 "$1"; fi
+}
+
+if [[ -e "$evidence" ]]; then
+  [[ -d "$evidence" && ! -L "$evidence" ]] || { echo 'Evidence path must be an ordinary directory' >&2; exit 1; }
+  [[ -z "$(find "$evidence" -mindepth 1 -maxdepth 1 -print -quit)" ]] || { echo 'Evidence directory must be empty' >&2; exit 1; }
+else
+  mkdir -p "$evidence"
+fi
+evidence="$(cd "$evidence" && pwd -P)"
+printf '%s\n' 'NOT_VERIFIED: native PostgreSQL actor wire verification incomplete' > "$evidence/RESULT.txt"
+
+require git
+require mvn
+require psql
+require "$java_bin"
+if ! command -v sha256sum >/dev/null 2>&1; then require shasum; fi
+
+[[ "$ack" == "I_ACKNOWLEDGE_DISPOSABLE_DATABASE" ]] ||
+  fail 'PG_TEST_DISPOSABLE acknowledgement is required'
+[[ "$dsn" == "postgresql://postgres@127.0.0.1:5432/postgres" ]] ||
+  fail 'PG_TEST_DSN must be the exact disposable loopback PostgreSQL fixture DSN'
+[[ "$expected_orm" =~ ^[0-9a-f]{40}$ ]] ||
+  fail 'EXPECTED_ORM_SHA must be an explicit lowercase 40-character SHA'
+
+actual_orm="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || fail 'cannot read ORM HEAD'
+[[ "$actual_orm" == "$expected_orm" ]] ||
+  fail "ORM head mismatch: expected $expected_orm; got $actual_orm"
+[[ -z "$(git -C "$root" status --porcelain --untracked-files=no)" ]] ||
+  fail 'ORM checkout has tracked modifications'
+[[ -z "$(git -C "$root" ls-files --others -- src tests scripts)" ]] ||
+  fail 'ORM checkout has untracked or ignored guest/build inputs'
+
+pinned="$(tr -d '\r\n' < "$root/SOURCE_REF")"
+[[ "$pinned" =~ ^[0-9a-f]{40}$ ]] || fail 'invalid compiler SOURCE_REF'
+[[ -d "$compiler" ]] || fail 'authorized private compiler checkout is missing'
+compiler="$(cd "$compiler" && pwd -P)"
+actual_compiler="$(git -C "$compiler" rev-parse HEAD 2>/dev/null)" || fail 'cannot read compiler HEAD'
+[[ "$actual_compiler" == "$pinned" ]] ||
+  fail "compiler head mismatch: expected $pinned; got $actual_compiler"
+[[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] ||
+  fail 'compiler checkout has tracked modifications'
+[[ -z "$(git -C "$compiler" ls-files --others -- src pom.xml .mvn)" ]] ||
+  fail 'compiler checkout has untracked or ignored build inputs'
+
+version="$("$java_bin" -version 2>&1 | head -n 1)" || fail 'cannot read Java version'
+[[ "$version" =~ \"25([.\" ]|$) ]] || fail "JDK 25 required; observed $version"
+mvn -version > "$evidence/maven-version.stdout" 2> "$evidence/maven-version.stderr" ||
+  fail 'cannot inspect Maven runtime'
+grep -Eq '^Java version: 25([.,[:space:]]|$)' "$evidence/maven-version.stdout" ||
+  fail 'Maven must run on JDK 25'
+
+printf 'orm_head=%s\ncompiler_head=%s\njava_version=%s\n'   "$actual_orm" "$actual_compiler" "$version" > "$evidence/provenance.txt"
+git -C "$root" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
+git -C "$compiler" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
+for file in SOURCE_REF scripts/ores scripts/verify-native-wire-actor src/pg.ores tests/pg17-native-wire-actor.ores; do
+  sha256_file "$root/$file" >> "$evidence/orm-sources.sha256"
+done
+
+if ! (cd "$compiler" && mvn -q -DskipTests clean package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt)     > "$evidence/compiler-build.stdout" 2> "$evidence/compiler-build.stderr"; then
+  fail 'pinned compiler clean build failed'
+fi
+[[ -s "$compiler/target/classpath.txt" ]] || fail 'compiler runtime classpath missing'
+[[ -f "$compiler/target/classes/dev/oreslang/launcher/OresMain.class" ]] ||
+  fail 'compiled OresMain.class missing'
+sha256_file "$compiler/target/classes/dev/oreslang/launcher/OresMain.class" > "$evidence/launcher.sha256"
+
+cleanup() {
+  psql -X -qAt -v ON_ERROR_STOP=1 "$dsn"     -c 'DROP TABLE IF EXISTS public.runs;'     > "$evidence/cleanup.stdout" 2> "$evidence/cleanup.stderr" || true
+}
+trap cleanup EXIT
+
+psql -X -qAt -v ON_ERROR_STOP=1 "$dsn" > "$evidence/seed.stdout" 2> "$evidence/seed.stderr" <<'SQL'
+DROP TABLE IF EXISTS public.runs;
+CREATE TABLE public.runs (
+  workspace_id uuid NOT NULL,
+  id uuid NOT NULL,
+  payload text,
+  PRIMARY KEY (workspace_id, id)
+);
+INSERT INTO public.runs(workspace_id, id, payload)
+VALUES (
+  '00000000-0000-0000-0000-000000000001'::uuid,
+  '00000000-0000-0000-0000-000000000002'::uuid,
+  'native-actor-wire'
+);
+SQL
+
+printf 'ORES_JAVA=%q ORESLANG_SOURCE_DIR=%q scripts/ores --permission-check=runtime --allow-net=127.0.0.1:5432 tests/pg17-native-wire-actor.ores\n'   "$java_bin" "$compiler" > "$evidence/commands.txt"
+
+set +e
+(
+  cd "$root"
+  ORES_JAVA="$java_bin" ORESLANG_SOURCE_DIR="$compiler"     "$root/scripts/ores"     --permission-check=runtime     --allow-net=127.0.0.1:5432     tests/pg17-native-wire-actor.ores
+) > "$evidence/native.stdout" 2> "$evidence/native.stderr"
+rc=$?
+set -e
+
+[[ "$rc" -eq 0 ]] || fail "native actor wire fixture exited $rc"
+printf '%s' 'PG_NATIVE_ACTOR_WIRE_PASS' > "$evidence/expected.stdout"
+cmp -s "$evidence/expected.stdout" "$evidence/native.stdout" ||
+  fail 'native actor wire stdout oracle mismatch'
+
+printf 'VERIFIED: native Oreslang actor executed PostgreSQL v3 over NIO at ORM %s compiler %s\n'   "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
+cat "$evidence/RESULT.txt"
