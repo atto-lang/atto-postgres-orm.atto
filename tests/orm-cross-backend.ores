@@ -17,16 +17,16 @@ pub routine main(): void {
     pg.column_spec("note", "text", true)
   ], arr["id"]);
   if ddl.is_err() then panic("portable typed PostgreSQL plan rejected"); fi
-  if ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  \"note\" text,\n  PRIMARY KEY (\"id\")\n)" then
+  if ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  \"note\" text,\n  PRIMARY KEY (\"id\")\n);\n" then
     panic("portable typed PostgreSQL DDL rendering drift");
   fi
 
-  if schema.table_checked("docs", "docs", arr[
+  if !schema.table_checked("docs", "docs", arr[
     schema.column("id", "id", "arbitrary-sql", false)
-  ]).is_ok() then panic("neutral schema admitted SQL fragments"); fi
-  if pg.table_typed_pk("docs;DROP", arr[
+  ]).is_err() then panic("neutral schema admitted SQL fragments"); fi
+  if !pg.table_typed_pk("docs;DROP", arr[
     pg.column_spec("id", "uuid", false)
-  ], arr["id"]).is_ok() then panic("typed PostgreSQL identifier injection admitted"); fi
+  ], arr["id"]).is_err() then panic("typed PostgreSQL identifier injection admitted"); fi
 
   stdio.println("Pure Oreslang combined ORM portability contracts passed");
   return;
