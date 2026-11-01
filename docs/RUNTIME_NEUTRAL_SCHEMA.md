@@ -200,3 +200,19 @@ harmless column reorder, and repeated destructive steps. Additional
 host-only tests cover complete op-to-risk mapping, scoped column IDs, schema
 bounds and non-authorizing review envelopes. The host-only tests are **not**
 evidence of native Oreslang execution.
+
+
+## Metamorphic schema-ORM regression extension (stage 6; native not run)
+
+The existing native `tests/schema-adversarial.ores` fixture now checks repeat
+planning byte stability, idempotent empty catalogs, harmless multi-table order
+changes, independent type/nullability changes in both directions, stable-ID
+name takeovers, physical name reuse across different stable identities,
+duplicate destructive table reviews, and permanently denied review status
+for all-safe proposals. The exact-head harness already requires this fixture.
+
+Host-only JSON Schema regression tests additionally exercise the 63-byte
+ASCII identifier admission boundary, complete eight-kind whitelist, rejected
+SQL/database type strings, and every operation's inability to add SQL,
+approval flags, or expanded scope. These are validator/source-level checks,
+not PostgreSQL, TypeSpec or native Oreslang execution evidence.

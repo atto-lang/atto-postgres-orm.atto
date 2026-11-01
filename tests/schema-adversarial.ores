@@ -183,6 +183,163 @@ pub routine main(): void {
   val empty_manifest = schema.review_manifest_preview_checked(rt borrow empty);
   if empty_manifest.is_err() then panic("empty review plan unexpectedly rejected"); fi
   if empty_manifest.unwrap() != "{\"schema\":\"ores.orm.plan-preview/v1\",\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,\"scope\":\"column_shapes_only\",\"steps\":[]}" then panic("empty plan lost exact deny-by-default envelope"); fi
+
+  // Metamorphic test: replay must be deterministic and must never mutate
+  // the public review envelope's permanent STOPPED/approved=false state.
+  val drift_plan_r = schema.diff_catalog_checked(rt borrow next_cat, rt borrow current_cat);
+  if drift_plan_r.is_err() then panic("repeated catalog diff rejected"); fi
+  val first_review = schema.review_manifest_preview_checked(rt borrow created.unwrap());
+  val repeat_review = schema.review_manifest_preview_checked(rt borrow drift_plan_r.unwrap());
+  if first_review.is_err() || repeat_review.is_err() then
+    panic("repeat review manifest rejected");
+  fi
+  if first_review.unwrap() != repeat_review.unwrap() then
+    panic("repeat review generated different bytes");
+  fi
+  if first_review.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == first_review.unwrap() then
+    panic("repeat review silently authorized");
+  fi
+
+  // Multi-table order is not semantic catalog drift.
+  val one_r = schema.table_checked("one","one",arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  val two_r = schema.table_checked("two","two",arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  if one_r.is_err() || two_r.is_err() then panic("multitable fixtures rejected"); fi
+  val one = one_r.unwrap();
+  val two = two_r.unwrap();
+  val ordered_r = schema.catalog_checked(arr[one,two]);
+  val reversed_r = schema.catalog_checked(arr[two,one]);
+  if ordered_r.is_err() || reversed_r.is_err() then panic("valid ordered catalogs rejected"); fi
+  val ordered = ordered_r.unwrap();
+  val reversed = reversed_r.unwrap();
+  val order_diff = schema.diff_catalog_checked(rt borrow ordered, rt borrow reversed);
+  if order_diff.is_err() || order_diff.unwrap().step_count() != 0 then
+    panic("table enumeration order created phantom drift");
+  fi
+  val stable_snapshot = schema.plan_from_snapshot_checked(
+    rt borrow ordered, rt borrow ordered, rt borrow reversed);
+  if stable_snapshot.is_err() || stable_snapshot.unwrap().step_count() != 0 then
+    panic("table reorder blocked a fresh baseline");
+  fi
+
+  // Type and nullable transitions must remain independent review steps
+  // and never be upgraded into automatic execution authority.
+  val current_m_r = schema.table_checked("mix","mix",arr[
+    schema.column("id","id","uuid",false),
+    schema.column("payload","payload","string",false)
+  ]);
+  val wanted_m_r = schema.table_checked("mix","mix",arr[
+    schema.column("id","id","uuid",false),
+    schema.column("payload","payload","boolean",true)
+  ]);
+  if current_m_r.is_err() || wanted_m_r.is_err() then panic("mixed type fixtures invalid"); fi
+  val current_m = current_m_r.unwrap();
+  val wanted_m = wanted_m_r.unwrap();
+  val mixed_m = schema.diff_checked(rt borrow wanted_m, rt borrow current_m);
+  if mixed_m.is_err() || mixed_m.unwrap().step_count() != 2 then
+    panic("type/nullability change lost an independent operation");
+  fi
+  if mixed_m.unwrap().step_at(0).unwrap().op != "review_type_change" ||
+    mixed_m.unwrap().step_at(0).unwrap().risk != "manual" then
+    panic("type widening escaped manual review");
+  fi
+  if mixed_m.unwrap().step_at(1).unwrap().op != "drop_not_null" ||
+    mixed_m.unwrap().step_at(1).unwrap().risk != "safe" then
+    panic("nullable relaxation classification changed");
+  fi
+  if !mixed_m.unwrap().has_blockers() then panic("mixed type plan lost blocker"); fi
+  val reverse_m = schema.diff_checked(rt borrow current_m, rt borrow wanted_m);
+  if reverse_m.is_err() || reverse_m.unwrap().step_count() != 2 then
+    panic("reverse type/nullability change lost a step");
+  fi
+  if reverse_m.unwrap().step_at(1).unwrap().op != "set_not_null" ||
+    reverse_m.unwrap().step_at(1).unwrap().risk != "preflight" then
+    panic("non-null tightening was not preflight gated");
+  fi
+
+  // Per-column name takeover with a different stable ID must STOP, even
+  // where a separate column's stable ID would otherwise be a valid rename.
+  val old_takeover_r = schema.table_checked("accounts","accounts",arr[
+    schema.column("customer_id","user_id","uuid",false),
+    schema.column("email","email","string",false)
+  ]);
+  val new_takeover_r = schema.table_checked("accounts","accounts",arr[
+    schema.column("customer_id","client_id","uuid",false),
+    schema.column("rogue_id","user_id","uuid",false)
+  ]);
+  if old_takeover_r.is_err() || new_takeover_r.is_err() then
+    panic("name takeover fixtures were not valid input catalogs");
+  fi
+  val old_takeover = old_takeover_r.unwrap();
+  val new_takeover = new_takeover_r.unwrap();
+  if !schema.diff_checked(rt borrow new_takeover, rt borrow old_takeover).is_err() then
+    panic("same physical column name with new stable ID bypassed mapping");
+  fi
+  val old_takeover_cat_r = schema.catalog_checked(arr[old_takeover]);
+  val new_takeover_cat_r = schema.catalog_checked(arr[new_takeover]);
+  if old_takeover_cat_r.is_err() || new_takeover_cat_r.is_err() then
+    panic("valid takeover catalogs rejected");
+  fi
+  val old_takeover_cat = old_takeover_cat_r.unwrap();
+  val new_takeover_cat = new_takeover_cat_r.unwrap();
+  if !schema.plan_from_snapshot_checked(
+    rt borrow new_takeover_cat, rt borrow old_takeover_cat, rt borrow old_takeover_cat).is_err() then
+    panic("mapped takeover generated a migration plan");
+  fi
+
+  // New table with an existing physical name is never inferred as a rename.
+  val original_table_r = schema.table_checked("orig","same_name",arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  val replacement_table_r = schema.table_checked("replacement","same_name",arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  if original_table_r.is_err() || replacement_table_r.is_err() then
+    panic("valid table collision test fixtures rejected");
+  fi
+  val original_table = original_table_r.unwrap();
+  val replacement_table = replacement_table_r.unwrap();
+  val original_cat_r = schema.catalog_checked(arr[original_table]);
+  val replacement_cat_r = schema.catalog_checked(arr[replacement_table]);
+  if original_cat_r.is_err() || replacement_cat_r.is_err() then
+    panic("valid catalog collision fixtures rejected");
+  fi
+  val original_cat = original_cat_r.unwrap();
+  val replacement_cat = replacement_cat_r.unwrap();
+  if !schema.diff_catalog_checked(rt borrow replacement_cat, rt borrow original_cat).is_err() then
+    panic("physical table name reuse silently inferred stable identity");
+  fi
+
+  // All-safe plans stay "unblocked" for manual review only; never approved.
+  val safe_plan = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","docs","new_nullable","safe"),
+    new SchemaStep("drop_not_null","docs","existing","safe")
+  ]);
+  if safe_plan.has_blockers() then panic("safe-only plan incorrectly blocked"); fi
+  val safe_preview = schema.review_manifest_preview_checked(rt borrow safe_plan);
+  if safe_preview.is_err() then panic("safe-only reviewed preview rejected"); fi
+  if safe_preview.unwrap().replace_literal("\"approved\":false","") == safe_preview.unwrap() then
+    panic("safe-only review gained execution approval");
+  fi
+  val repeated_table_review = new SchemaPlan(arr[
+    new SchemaStep("review_drop_table","docs","","destructive"),
+    new SchemaStep("review_drop_table","docs","","destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow repeated_table_review).is_err() then
+    panic("duplicate destructive table operation admitted");
+  fi
+  // A clean, empty catalog is legitimate; it cannot grant DDL capability.
+  val empty_catalog_r = schema.catalog_checked(arr[]);
+  if empty_catalog_r.is_err() then panic("empty portable catalog rejected"); fi
+  val empty_catalog = empty_catalog_r.unwrap();
+  val empty_snapshot_r = schema.plan_from_snapshot_checked(
+    rt borrow empty_catalog, rt borrow empty_catalog, rt borrow empty_catalog);
+  if empty_snapshot_r.is_err() || empty_snapshot_r.unwrap().step_count() != 0 then
+    panic("empty catalog incorrectly reported drift");
+  fi
   stdio.println("Pure Oreslang adversarial schema contracts passed");
   return;
 }

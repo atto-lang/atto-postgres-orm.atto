@@ -387,5 +387,98 @@ class CatalogContractTests(unittest.TestCase):
             self.assertIn(guard, guest)
 
 
+    def test_portable_catalog_exhaustive_boundary_mutations(self):
+        """Host-only JSON Schema checks; no Oreslang compiler or SQL invoked."""
+        table = self.current["tables"][0]
+        for field in ("stable_id", "name"):
+            for name in ("_", "a", "Z_9", "a" * 63):
+                candidate = copy.deepcopy(self.current)
+                candidate["tables"][0][field] = name
+                with self.subTest(field=field, name=name):
+                    self.validator.validate(candidate)
+            for name in ("", "9bad", "-dash", "a b", "a.b", "a\\tb",
+                         "é", "Ω", "a|b", "a;DROP", "a" * 64):
+                candidate = copy.deepcopy(self.current)
+                candidate["tables"][0][field] = name
+                with self.subTest(field=field, name=name), self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+        for field in ("stable_id", "name"):
+            for name in ("_", "a", "Z_9", "a" * 63):
+                candidate = copy.deepcopy(self.current)
+                candidate["tables"][0]["columns"][0][field] = name
+                with self.subTest(field=field, name=name):
+                    self.validator.validate(candidate)
+            for name in ("", "9bad", "-dash", "a b", "a.b", "a\\tb",
+                         "é", "Ω", "a|b", "a;DROP", "a" * 64):
+                candidate = copy.deepcopy(self.current)
+                candidate["tables"][0]["columns"][0][field] = name
+                with self.subTest(field=field, name=name), self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+        # Do not claim this schema checks duplicate stable IDs: JSON Schema
+        # uniqueItems cannot express uniqueness by selected object properties.
+        self.assertEqual(len(table["columns"]), 3)
+
+    def test_schema_unknown_scalar_type_mutations(self):
+        for kind in self.schema["$defs"]["ColumnKind"]["enum"]:
+            candidate = copy.deepcopy(self.current)
+            candidate["tables"][0]["columns"][0]["kind"] = kind
+            with self.subTest(kind=kind):
+                self.validator.validate(candidate)
+        for kind in ("UUID", "varchar(64)", "text", "serial", "int", "float",
+                     "vector(3)", "null", "", "bytea", "int8", "timestampz"):
+            candidate = copy.deepcopy(self.current)
+            candidate["tables"][0]["columns"][0]["kind"] = kind
+            with self.subTest(kind=kind), self.assertRaises(ValidationError):
+                self.validator.validate(candidate)
+
+    def test_review_envelope_non_authorization_cross_product(self):
+        plan_schema = load("contracts/orm-plan-preview.schema.json")
+        Draft202012Validator.check_schema(plan_schema)
+        validator = Draft202012Validator(plan_schema)
+        fixture = load("contracts/examples/plan-preview.json")
+        for operation in plan_schema["$defs"]["Step"]["properties"]["op"]["enum"]:
+            table_op = operation in ("review_table_rename", "review_create_table", "review_drop_table")
+            risk = {
+                "review_table_rename": "manual", "review_create_table": "manual",
+                "review_drop_table": "destructive", "review_column_rename": "manual",
+                "review_type_change": "manual", "drop_not_null": "safe",
+                "add_nullable_column": "safe", "set_not_null": "preflight",
+                "add_required_column": "preflight", "drop_column": "destructive",
+            }[operation]
+            base = copy.deepcopy(fixture)
+            base["steps"] = [{"op": operation, "table_id": "users",
+                              "column_id": "" if table_op else "id", "risk": risk}]
+            validator.validate(base)
+            for forged in (
+                lambda p: p.update(approved=True),
+                lambda p: p.update(status="APPROVED"),
+                lambda p: p.update(scope="full_catalog"),
+                lambda p: p.update(sql="DROP TABLE users"),
+                lambda p: p["steps"][0].update(sql="DROP TABLE users"),
+                lambda p: p["steps"][0].update(approved=True),
+            ):
+                candidate = copy.deepcopy(base)
+                forged(candidate)
+                with self.subTest(operation=operation, forged=str(forged)), self.assertRaises(ValidationError):
+                    validator.validate(candidate)
+
+    def test_metamorphic_drift_guest_suite_is_part_of_required_oracle(self):
+        """Source hook only; executed guest evidence must be a separate gate."""
+        guest = (ROOT / "tests/schema-adversarial.ores").read_text(encoding="utf-8")
+        launcher = (ROOT / "scripts/verify-native-plans").read_text(encoding="utf-8")
+        for check in (
+            "repeat review generated different bytes",
+            "table enumeration order created phantom drift",
+            "type/nullability change lost an independent operation",
+            "same physical column name with new stable ID bypassed mapping",
+            "physical table name reuse silently inferred stable identity",
+            "safe-only review gained execution approval",
+            "duplicate destructive table operation admitted",
+            "empty catalog incorrectly reported drift",
+        ):
+            self.assertIn(check, guest)
+        self.assertIn("run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive", launcher)
+
+
 if __name__ == "__main__":
     unittest.main()
