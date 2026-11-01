@@ -7,6 +7,10 @@ pub routine main(): void {
   val query = pg.find_in_workspace("runs", "hostile' OR true--", "id");
   if query.params.get(0) != "hostile' OR true--" then panic("bound params"); fi
   if query.sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query SQL"); fi
+  // Three additional SQL-plan contracts: escaping, type admission, value binding.
+  if pg.ident("a\"b") != "\"a\"\"b\"" then panic("embedded quote not escaped"); fi
+  if !pg.column("name", "uuid; SELECT 1", false).is_err() then panic("type-token injection"); fi
+  if query.params.get(1) != "id" then panic("identifier value must remain bound"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }
