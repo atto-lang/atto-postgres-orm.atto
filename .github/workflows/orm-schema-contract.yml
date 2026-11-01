@@ -6,6 +6,8 @@ on:
       - 'tests/schema-plans.ores'
       - 'tests/schema-adversarial.ores'
       - 'tests/schema-invariants.ores'
+      - 'tests/migration_portability.rs'
+      - 'docs/MIGRATION_BACKEND_PARITY.md'
       - 'tests/orm-cross-backend.ores'
       - 'scripts/verify-native-plans'
       - 'scripts/verify-orm-five-backend-receipts.py'
@@ -58,3 +60,21 @@ jobs:
           grep -Fx 'NOT_VERIFIED: 5 toolchains x 5 suites = 25 compiled guest receipts required' orm-parity-preflight.txt
       - name: Evidence boundary
         run: echo 'JSON_SCHEMA_HOST_ONLY: no TypeSpec semantic parity, Oreslang compiler, SQL or PostgreSQL tests executed'
+
+  migration-source-guard-rust-only:
+    name: Rust-only migration source guard (NOT guest parity)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - name: Checkout exact PR head without credentials
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Verify Rust source guards only, not native Oreslang
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version
+          rustc --edition=2021 --test tests/migration_portability.rs -o "${RUNNER_TEMP}/orm-migration-source-tests"
+          "${RUNNER_TEMP}/orm-migration-source-tests" --nocapture
+          printf '%s\n' 'MIGRATION_STATIC_ONLY: native Oreslang, backend and PostgreSQL execution unverified'

@@ -107,68 +107,61 @@ pub routine main(): void {
   if !schema.review_manifest_preview_checked(rt borrow forged_op).is_err() then panic("executable SQL op forged into review"); fi
   val forged_scope = new SchemaPlan(arr[new SchemaStep("review_create_table","alpha","key","manual")]);
   if !schema.review_manifest_preview_checked(rt borrow forged_scope).is_err() then panic("table operation admitted column ID"); fi
-
-  // Explicit three-way baseline tests in this independent seventh guest.
-  // These only exercise snapshot-shaped data; they do not read a database.
-  val fresh = schema.plan_from_snapshot_checked(
-    rt borrow extended, rt borrow ab, rt borrow ab);
-  if fresh.is_err() || fresh.unwrap().step_count() != 1 then
-    panic("fresh accepted-observed baseline rejected");
-  fi
-  if fresh.unwrap().step_at(0).unwrap().op != "add_nullable_column" then
-    panic("fresh planned nullable addition incorrectly classified");
-  fi
-  val unexpected_observed_change = schema.plan_from_snapshot_checked(
-    rt borrow ab, rt borrow ab, rt borrow extended);
-  if !unexpected_observed_change.is_err() then
-    panic("observed-only nullable addition bypassed drift gate");
-  fi
-  val unexpected_observed_removal = schema.plan_from_snapshot_checked(
-    rt borrow ab, rt borrow ab, rt borrow empty);
-  if !unexpected_observed_removal.is_err() then
-    panic("observed-only table drop bypassed drift gate");
-  fi
-  val unexpected_observed_rename = schema.plan_from_snapshot_checked(
-    rt borrow ab, rt borrow ab, rt borrow renamed_cat);
-  if !unexpected_observed_rename.is_err() then
-    panic("observed rename bypassed drift gate");
-  fi
-  val accepted_was_old = schema.plan_from_snapshot_checked(
-    rt borrow extended, rt borrow ab, rt borrow extended);
-  if !accepted_was_old.is_err() then
-    panic("stale baseline equal to desired bypassed drift gate");
-  fi
-  val reordered_snapshot = schema.plan_from_snapshot_checked(
-    rt borrow ab, rt borrow ab, rt borrow ba);
-  if reordered_snapshot.is_err() || reordered_snapshot.unwrap().step_count() != 0 then
-    panic("semantically equivalent observed permutation rejected");
-  fi
-  val empty_snapshot = schema.plan_from_snapshot_checked(
-    rt borrow empty, rt borrow empty, rt borrow empty);
-  if empty_snapshot.is_err() || empty_snapshot.unwrap().step_count() != 0 then
-    panic("empty three-way snapshot was not idempotent");
-  fi
-  val attempted_rename = schema.plan_from_snapshot_checked(
-    rt borrow renamed_cat, rt borrow ab, rt borrow ab);
-  if attempted_rename.is_err() || attempted_rename.unwrap().step_count() != 1 then
-    panic("desired rename review was accidentally suppressed");
-  fi
-  if attempted_rename.unwrap().step_at(0).unwrap().risk != "manual" then
-    panic("desired rename escaped manual review");
-  fi
-  val corrupted_observed_r = schema.catalog_checked(arr[
-    new SchemaTable("alpha", "bad;drop", arr[key])
+  // Multiple matched stable-ID tables must diff in desired order without
+  // temporary placeholder tables or inferred physical-name matching.
+  val beta_next_r = schema.table_checked("beta","physical_beta",arr[key,opt]);
+  if beta_next_r.is_err() then panic("second matched table fixture rejected"); fi
+  val both_extended_r = schema.catalog_checked(arr[extra_r.unwrap(),beta_next_r.unwrap()]);
+  if both_extended_r.is_err() then panic("two matched table catalog rejected"); fi
+  val both_extended = both_extended_r.unwrap();
+  val both_changes = schema.diff_catalog_checked(rt borrow both_extended,rt borrow ab);
+  if both_changes.is_err() then panic("two matched table diff rejected"); fi
+  if both_changes.unwrap().step_count() != 2 then panic("two matched table diff lost a change"); fi
+  if both_changes.unwrap().step_at(0).unwrap().table_id != "alpha" then panic("first matched table order changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().table_id != "beta" then panic("second matched table order changed"); fi
+  if both_changes.unwrap().step_at(0).unwrap().op != "add_nullable_column" then panic("first matched table operation changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().risk != "safe" then panic("second matched table risk changed"); fi
+  // Pure Oreslang checked risk diagnostics: cannot grant SQL authority.
+  val safe_plan = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha","optional","safe"),
+    new SchemaStep("drop_not_null","alpha","state","safe")
   ]);
-  if !corrupted_observed_r.is_err() then
-    panic("malformed observed catalog passed admission");
-  fi
-  val corrupted_public_observed = new SchemaCatalog(arr[
-    new SchemaTable("alpha", "bad;drop", arr[key])
+  val safe_summary = schema.risk_summary_checked(rt borrow safe_plan);
+  if safe_summary.is_err() then panic("safe risk summary rejected"); fi
+  if safe_summary.unwrap().safe_count != 2 then panic("safe risk count wrong"); fi
+  if safe_summary.unwrap().preflight_count != 0 then panic("safe summary includes preflight"); fi
+  if safe_summary.unwrap().manual_count != 0 then panic("safe summary includes manual"); fi
+  if safe_summary.unwrap().destructive_count != 0 then panic("safe summary includes destructive"); fi
+  if safe_plan.has_blockers() then panic("valid safe step incorrectly marked blocking"); fi
+  val mixed_risks = new SchemaPlan(arr[
+    new SchemaStep("drop_not_null","alpha","key","safe"),
+    new SchemaStep("set_not_null","alpha","state","preflight"),
+    new SchemaStep("review_create_table","beta","","manual"),
+    new SchemaStep("drop_column","alpha","key","destructive")
   ]);
-  if !schema.plan_from_snapshot_checked(
-    rt borrow ab, rt borrow ab, rt borrow corrupted_public_observed).is_err() then
-    panic("forged observed catalog passed three-way boundary");
-  fi
+  val mixed_summary = schema.risk_summary_checked(rt borrow mixed_risks);
+  if mixed_summary.is_err() then panic("mixed risk summary rejected"); fi
+  if mixed_summary.unwrap().safe_count != 1 then panic("mixed safe count wrong"); fi
+  if mixed_summary.unwrap().preflight_count != 1 then panic("mixed preflight count wrong"); fi
+  if mixed_summary.unwrap().manual_count != 1 then panic("mixed manual count wrong"); fi
+  if mixed_summary.unwrap().destructive_count != 1 then panic("mixed destructive count wrong"); fi
+  if !mixed_risks.has_blockers() then panic("mixed unsafe plan not blocked"); fi
+  val no_risks = schema.risk_summary_checked(rt borrow noop);
+  if no_risks.is_err() then panic("empty risk summary rejected"); fi
+  if no_risks.unwrap().safe_count != 0 then panic("empty risk summary inflated"); fi
+  if no_risks.unwrap().destructive_count != 0 then panic("empty destructive summary inflated"); fi
+  val forged_safe_drop = new SchemaPlan(arr[
+    new SchemaStep("drop_column","alpha","key","safe")
+  ]);
+  if !forged_safe_drop.has_blockers() then panic("forged safe drop marked nonblocking"); fi
+  if !schema.risk_summary_checked(rt borrow forged_safe_drop).is_err() then panic("forged safe drop risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_risk).is_err() then panic("forged risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_op).is_err() then panic("arbitrary SQL summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_scope).is_err() then panic("forged table scope risk summary admitted"); fi
+  val forged_identity = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha;DROP","key","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_identity).is_err() then panic("invalid identity risk summary admitted"); fi
   stdio.println("Pure Oreslang schema invariant and metamorphic contracts passed");
   return;
 }

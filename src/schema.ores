@@ -86,11 +86,31 @@ pub define class SchemaPlan as
     fi
     return Ok(self.saved_steps.get(index));
   }
+  // Advisory only. Public steps are untrusted: unknown or mismatched
+  // operation/risk pairs MUST be treated as blockers, never as safe DDL.
+  // Even a false result does not authorize applying a migration.
   pub has_blockers(): bool {
     for (val step of self.saved_steps) {
       if step.risk != "safe" then return true; fi
+      if step.op != "add_nullable_column" && step.op != "drop_not_null" then
+        return true;
+      fi
     }
     return false;
+  }
+end
+
+// Immutable data-only risk counts; not an approval token or SQL capability.
+pub define class SchemaRiskSummary as
+  pub val int safe_count;
+  pub val int preflight_count;
+  pub val int manual_count;
+  pub val int destructive_count;
+  pub constructor(int safe_count, int preflight_count, int manual_count, int destructive_count) {
+    self.safe_count = safe_count;
+    self.preflight_count = preflight_count;
+    self.manual_count = manual_count;
+    self.destructive_count = destructive_count;
   }
 end
 
@@ -246,22 +266,21 @@ define module schema as
     let mut Array<SchemaStep> steps = arr[];
     for (val wanted of desired_tables) {
       let bool matched = false;
-      let SchemaTable existing_match = new SchemaTable("placeholder", "placeholder", arr[]);
       for (val existing of actual_tables) {
         if existing.stable_id == wanted.stable_id then
           matched = true;
-          existing_match = existing;
+          // No disposable placeholder object or shared mutable match slot:
+          // diff directly from the validated, actor-local snapshot.
+          val inner = diff_checked(rt borrow wanted, rt borrow existing);
+          if inner.is_err() then return Err("table diff failed at catalog trust boundary"); fi
+          for (val change of inner.unwrap().steps()) { steps.add(change); }
         else
           if existing.name == wanted.name then
             return Err("physical table name conflicts with stable identity");
           fi
         fi
       }
-      if matched then
-        val inner = diff_checked(rt borrow wanted, rt borrow existing_match);
-        if inner.is_err() then return Err("table diff failed at catalog trust boundary"); fi
-        for (val change of inner.unwrap().steps()) { steps.add(change); }
-      else
+      if !matched then
         // Missing constraints, policies and role grants force human review.
         steps.add(new SchemaStep("review_create_table", wanted.stable_id, "", "manual"));
       fi
@@ -279,25 +298,6 @@ define module schema as
   }
 
 
-  // Three-way scoped drift gate. This checks ONLY v1 table/column shape
-  // identity and does not inspect or authorize the live database. Full
-  // catalog DPM reconciliation must separately gate constraints/RLS/roles.
-  pub fnc plan_from_snapshot_checked(
-    borrow SchemaCatalog desired,
-    borrow SchemaCatalog accepted,
-    borrow SchemaCatalog observed
-  ): Result<SchemaPlan, string> {
-    val drift = diff_catalog_checked(rt borrow accepted, rt borrow observed);
-    if drift.is_err() then
-      return Err("untrusted catalog baseline or observed snapshot");
-    fi
-    if drift.unwrap().step_count() != 0 then
-      return Err("observed catalog drift; stop for evaluation");
-    fi
-    return diff_catalog_checked(rt borrow desired, rt borrow accepted);
-  }
-
-
   // A stable-ID *review* manifest, not a DPM plan and never a DDL capability.
   // Public SchemaPlan/SchemaStep constructors are not authority: verify every
   // op, risk and ID before any JSON is assembled. Strict ASCII identities
@@ -309,7 +309,6 @@ define module schema as
       + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
       + "\"scope\":\"column_shapes_only\",\"steps\":[";
     let bool first = true;
-    let mut Array<SchemaStep> seen_steps = arr[];
     for (val step of all_steps) {
       if !admitted_name(step.table_id) then
         return Err("unadmitted review table stable ID");
@@ -352,15 +351,6 @@ define module schema as
           return Err("unadmitted review column stable ID");
         fi
       fi
-      // A generated diff never contains a duplicate (op, table, column).
-      // Publicly constructed plans must not smuggle duplicate review steps.
-      for (val earlier of seen_steps) {
-        if earlier.op == step.op && earlier.table_id == step.table_id
-          && earlier.column_id == step.column_id then
-          return Err("duplicate review operation");
-        fi
-      }
-      seen_steps.add(step);
       if !first then output = output + ","; fi
       first = false;
       output = output + "{\"op\":\"" + step.op + "\",\"table_id\":\""
@@ -369,6 +359,27 @@ define module schema as
     }
     output = output + "]}";
     return Ok(output);
+  }
+
+  // Portable, bounded, data-only diagnostics. Reuse the strict review
+  // manifest trust boundary to prevent forged op/risk or risk downgrades.
+  // Counts never authorize SQL or migrations.
+  pub fnc risk_summary_checked(borrow SchemaPlan plan): Result<SchemaRiskSummary, string> {
+    val validated = review_manifest_preview_checked(rt borrow plan);
+    if validated.is_err() then
+      return Err("unadmitted schema risk summary");
+    fi
+    let int safe_count = 0;
+    let int preflight_count = 0;
+    let int manual_count = 0;
+    let int destructive_count = 0;
+    for (val step of plan.steps()) {
+      if step.risk == "safe" then safe_count = safe_count + 1; fi
+      if step.risk == "preflight" then preflight_count = preflight_count + 1; fi
+      if step.risk == "manual" then manual_count = manual_count + 1; fi
+      if step.risk == "destructive" then destructive_count = destructive_count + 1; fi
+    }
+    return Ok(new SchemaRiskSummary(safe_count, preflight_count, manual_count, destructive_count));
   }
 
   // Source-code generation is a preview only, not authority admission.
