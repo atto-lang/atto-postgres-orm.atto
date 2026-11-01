@@ -276,3 +276,7 @@ service job, or an authorized disposable database is supplied.** Native JDK25
 Oreslang compilation, driver parameter binding, cancellation, independent
 tenant RLS and five-backend parity remain distinct unfulfilled gates. The
 SQL-only job must not be counted as native or production release evidence.
+
+## Native pinned-compiler schema regression extension (not yet executed)
+
+The six-oracle scripts/verify-native-plans path now demands the existing PostgreSQL planner positive and three negative guest cases plus tests/schema-plans.ores and tests/schema-adversarial.ores. Every stdout is exact-compared; nonzero, missing or reordered cases fail the receipt, and both additional guest sources are included in provenance hashes. tests/verify-native-plans-host.bash deliberately withholds the new adversarial sentinel to test fail-closed admission. The new Oreslang suite has 83 explicit panic assertions with parameterized kind and risk cases. These remain authored source, not compiler-backed evidence until an exact-head native job executes.

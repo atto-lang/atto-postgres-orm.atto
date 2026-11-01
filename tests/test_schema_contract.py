@@ -155,6 +155,144 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn("unadmitted review column stable ID", source)
 
 
+    def test_portable_catalog_size_bounds(self):
+        """Host-only Draft 2020-12 bounds, not Oreslang catalog execution."""
+        template = copy.deepcopy(self.current["tables"][0])
+        legal = copy.deepcopy(self.current)
+        legal["tables"] = []
+        for i in range(256):
+            candidate = copy.deepcopy(template)
+            candidate["stable_id"] = f"table_{i:03d}"
+            candidate["name"] = f"table_{i:03d}"
+            legal["tables"].append(candidate)
+        self.validator.validate(legal)
+        illegal = copy.deepcopy(legal)
+        illegal["tables"].append(copy.deepcopy(template))
+        with self.assertRaises(ValidationError):
+            self.validator.validate(illegal)
+
+    def test_column_count_limits(self):
+        """Closed bounded catalog, no implicit migration of excess fields."""
+        current = copy.deepcopy(self.current)
+        sample = copy.deepcopy(current["tables"][0]["columns"][0])
+        columns = []
+        for i in range(64):
+            c = copy.deepcopy(sample)
+            c["stable_id"] = f"col_{i:02d}"
+            c["name"] = f"col_{i:02d}"
+            columns.append(c)
+        current["tables"][0]["columns"] = columns
+        self.validator.validate(current)
+        current["tables"][0]["columns"].append(copy.deepcopy(sample))
+        with self.assertRaises(ValidationError):
+            self.validator.validate(current)
+        current["tables"][0]["columns"] = []
+        with self.assertRaises(ValidationError):
+            self.validator.validate(current)
+
+    def test_column_identity_and_kind_mutation_matrix(self):
+        """12 distinct malformed field mutations with exact Draft 2020-12 oracle."""
+        mutations = [
+            ("stable_id", ""), ("stable_id", "9bad"), ("stable_id", "a.b"),
+            ("stable_id", "a b"), ("stable_id", "name|scope"),
+            ("stable_id", "x" * 64), ("stable_id", "é"),
+            ("name", ""), ("name", "0start"), ("name", "a;DROP"),
+            ("kind", "UUID"), ("kind", "varchar(25)"),
+        ]
+        for key, value in mutations:
+            with self.subTest(field=key, value=value):
+                candidate = copy.deepcopy(self.current)
+                candidate["tables"][0]["columns"][0][key] = value
+                with self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+
+    def test_review_manifest_all_ten_operation_risk_pairs(self):
+        """A valid preview is always stopped, never approval to apply."""
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        table_ops = ("review_table_rename", "review_create_table", "review_drop_table")
+        risk_for_op = {
+            "review_table_rename": "manual",
+            "review_create_table": "manual",
+            "review_drop_table": "destructive",
+            "review_column_rename": "manual",
+            "review_type_change": "manual",
+            "drop_not_null": "safe",
+            "add_nullable_column": "safe",
+            "set_not_null": "preflight",
+            "add_required_column": "preflight",
+            "drop_column": "destructive",
+        }
+        base = load("contracts/examples/plan-preview.json")
+        for operation, risk in risk_for_op.items():
+            with self.subTest(operation=operation):
+                candidate = copy.deepcopy(base)
+                candidate["steps"] = [
+                    {"op": operation, "table_id": "docs",
+                     "column_id": "" if operation in table_ops else "field",
+                     "risk": risk}
+                ]
+                validator.validate(candidate)
+                self.assertIs(candidate["approved"], False)
+                self.assertEqual(candidate["status"], "STOPPED_FOR_EVALUATION")
+                for wrong_risk in {"safe", "preflight", "manual", "destructive"} - {risk}:
+                    wrong = copy.deepcopy(candidate)
+                    wrong["steps"][0]["risk"] = wrong_risk
+                    with self.assertRaises(ValidationError):
+                        validator.validate(wrong)
+
+    def test_review_manifest_wrong_scope_and_injection_matrix(self):
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        base = load("contracts/examples/plan-preview.json")
+        bad_table_ids = ("", "9bad", "a.b", "a;DROP", "é", "a" * 64)
+        for value in bad_table_ids:
+            with self.subTest(field="table_id", value=value):
+                candidate = copy.deepcopy(base)
+                candidate["steps"][0]["table_id"] = value
+                with self.assertRaises(ValidationError):
+                    validator.validate(candidate)
+        for bad_col in ("field", "field2", "name_a"):
+            with self.subTest(field="table-only-column", value=bad_col):
+                candidate = copy.deepcopy(base)
+                candidate["steps"][0]["column_id"] = bad_col
+                with self.assertRaises(ValidationError):
+                    validator.validate(candidate)
+        for bad_col in ("", "9bad", "a.b", "x;DROP", "é", "x" * 64):
+            with self.subTest(field="column-id", value=bad_col):
+                candidate = copy.deepcopy(base)
+                candidate["steps"] = [{"op": "drop_column", "table_id": "docs",
+                                       "column_id": bad_col, "risk": "destructive"}]
+                with self.assertRaises(ValidationError):
+                    validator.validate(candidate)
+
+    def test_review_manifest_2048_step_bound(self):
+        validator = Draft202012Validator(load("contracts/orm-plan-preview.schema.json"))
+        manifest = load("contracts/examples/plan-preview.json")
+        step = copy.deepcopy(manifest["steps"][0])
+        manifest["steps"] = [{**step, "table_id": f"tbl_{i}"} for i in range(2048)]
+        validator.validate(manifest)
+        manifest["steps"].append(copy.deepcopy(step))
+        with self.assertRaises(ValidationError):
+            validator.validate(manifest)
+
+    def test_native_adversarial_suite_is_required_by_exact_head_harness(self):
+        """Host source guard only: does not claim native compiler execution."""
+        script = (ROOT / "scripts/verify-native-plans").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/schema-adversarial.ores").read_text(encoding="utf-8")
+        mock = (ROOT / "tests/verify-native-plans-host.bash").read_text(encoding="utf-8")
+        for marker in (
+            "run_guest schema-plans tests/schema-plans.ores schema-positive",
+            "run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive",
+            "required_cases=", "native guest receipt row count mismatch",
+            "tests/schema-adversarial.ores",
+        ):
+            self.assertIn(marker, script)
+        self.assertIn("Pure Oreslang adversarial schema contracts passed", guest)
+        self.assertIn("missing-schema-adversarial-oracle", mock)
+        self.assertIn("MOCK_HOST_GATE_SCENARIOS=11/11 PASS", mock)
+
+
     def test_catalog_boundaries_and_closed_models(self):
         for target, mutate in (
             ("too-many-tables", lambda c: c.update(tables=c["tables"] * 257)),

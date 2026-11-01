@@ -4,6 +4,8 @@ on:
     paths:
       - 'src/schema.ores'
       - 'tests/schema-plans.ores'
+      - 'tests/schema-adversarial.ores'
+      - 'scripts/verify-native-plans'
       - 'tests/test_schema_contract.py'
       - 'contracts/**'
       - '.github/workflows/orm-schema-contract.yml'
