@@ -155,5 +155,99 @@ class CatalogContractTests(unittest.TestCase):
         self.assertIn("unadmitted review column stable ID", source)
 
 
+    def test_catalog_boundaries_and_closed_models(self):
+        for target, mutate in (
+            ("too-many-tables", lambda c: c.update(tables=c["tables"] * 257)),
+            ("too-many-columns", lambda c: c["tables"][0].update(columns=c["tables"][0]["columns"] * 22)),
+            ("illegal-table-name", lambda c: c["tables"][0].update(name="9starts_digit")),
+            ("illegal-table-stable-id", lambda c: c["tables"][0].update(stable_id="éx")),
+            ("illegal-column-stable-id", lambda c: c["tables"][0]["columns"][0].update(stable_id="a/b")),
+            ("forged-table-sql", lambda c: c["tables"][0].update(sql="DROP TABLE users")),
+            ("unknown-column-metadata", lambda c: c["tables"][0]["columns"][0].update(default_sql="1")),
+            ("missing-table-columns", lambda c: c["tables"][0].pop("columns")),
+        ):
+            with self.subTest(target=target):
+                candidate = copy.deepcopy(self.current)
+                mutate(candidate)
+                with self.assertRaises(ValidationError):
+                    self.validator.validate(candidate)
+
+    def test_all_review_ops_have_exact_risk_and_scope(self):
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        risk = {
+            "review_table_rename": "manual",
+            "review_create_table": "manual",
+            "review_drop_table": "destructive",
+            "review_column_rename": "manual",
+            "review_type_change": "manual",
+            "drop_not_null": "safe",
+            "add_nullable_column": "safe",
+            "set_not_null": "preflight",
+            "add_required_column": "preflight",
+            "drop_column": "destructive",
+        }
+        self.assertEqual(set(schema["$defs"]["Step"]["properties"]["op"]["enum"]), set(risk))
+        table_ops = {"review_table_rename", "review_create_table", "review_drop_table"}
+        for op, expected in risk.items():
+            with self.subTest(op=op):
+                base = load("contracts/examples/plan-preview.json")
+                base["steps"] = [{"op": op, "table_id": "users",
+                                  "column_id": "" if op in table_ops else "name",
+                                  "risk": expected}]
+                validator.validate(base)
+                for bad_risk in set(risk.values()) - {expected}:
+                    tampered = copy.deepcopy(base)
+                    tampered["steps"][0]["risk"] = bad_risk
+                    with self.assertRaises(ValidationError):
+                        validator.validate(tampered)
+                tampered = copy.deepcopy(base)
+                tampered["steps"][0]["column_id"] = "name" if op in table_ops else ""
+                with self.assertRaises(ValidationError):
+                    validator.validate(tampered)
+
+    def test_duplicate_review_steps_denied(self):
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        original = load("contracts/examples/plan-preview.json")
+        original["steps"].append(copy.deepcopy(original["steps"][0]))
+        with self.assertRaises(ValidationError):
+            validator.validate(original)
+
+    def test_review_manifest_is_never_an_execution_capability(self):
+        schema = load("contracts/orm-plan-preview.schema.json")
+        validator = Draft202012Validator(schema)
+        for mutate in (
+            lambda x: x.update(approved=True),
+            lambda x: x.update(status="APPROVED"),
+            lambda x: x.update(scope="full_database"),
+            lambda x: x.update(migration_sql="ALTER TABLE users DROP COLUMN id"),
+            lambda x: x.update(execution_token="admin"),
+            lambda x: x["steps"][0].update(approved=True),
+        ):
+            candidate = load("contracts/examples/plan-preview.json")
+            mutate(candidate)
+            with self.assertRaises(ValidationError):
+                validator.validate(candidate)
+
+    def test_three_way_drift_implementation_is_guest_not_host_oracle(self):
+        source = (ROOT / "src/schema.ores").read_text(encoding="utf-8")
+        guest = (ROOT / "tests/schema-plans.ores").read_text(encoding="utf-8")
+        self.assertIn("pub fnc plan_from_snapshot_checked(", source)
+        self.assertIn("diff_catalog_checked(rt borrow accepted, rt borrow observed)", source)
+        self.assertIn("observed catalog drift; stop for evaluation", source)
+        self.assertIn("duplicate review operation", source)
+        for guard in (
+            "untracked observed table bypassed baseline drift gate",
+            "observed desired-state drift silently adopted",
+            "observed type drift silently adopted",
+            "observed stable-ID conflict silently adopted",
+            "forged observed catalog bypassed trust boundary",
+            "duplicated destructive review operation admitted",
+            "non-semantic observed column reordering caused false drift",
+        ):
+            self.assertIn(guard, guest)
+
+
 if __name__ == "__main__":
     unittest.main()

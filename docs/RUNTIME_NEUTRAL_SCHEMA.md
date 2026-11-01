@@ -169,3 +169,34 @@ approved peer-authority digests, complete desired/observed catalog
 identities, independent SQL candidates, engine/extension/version pins,
 execution lease, operator authorization and post-apply read-back before
 any actual migration is planned or applied.
+
+
+## Three-way snapshot drift gate (stage 5, non-executable)
+
+`schema.plan_from_snapshot_checked(desired, accepted, observed)` first
+compares the **accepted catalog snapshot** with the **observed catalog
+projection**. On any modeled change (column/type/nullability, table identity
+or physical-name drift, added or removed table) it returns an error and does
+not create a desired-state plan. If they match, it produces the same scoped
+review plan as `schema.diff_catalog_checked(desired, accepted)`.
+Column enumeration order is not a v1 semantic difference.
+
+This gate does **NOT** introspect PostgreSQL, check metadata beyond the v1
+shape envelope, compare SQL, verify RLS/grants/indexes, or authorize a
+migration. A real application must not treat a no-drift result here as
+full-database equivalence or readiness to apply. The complete, independently
+validated DPM catalog and its locks, roles, approvals and readback remain
+separate mandatory gates.
+
+Publicly constructed review plans now reject duplicate operation/table/column
+triples. The closed JSON Schema preview also rejects exact duplicate step
+objects. Distinct legitimate operations on one stable column remain allowed.
+Both layers always preserve `approved: false` and
+`STOPPED_FOR_EVALUATION`.
+
+The new Oreslang guest fixture covers baseline freshness, observed-only
+tables, type/name changes, stable-ID collisions, forged public objects,
+harmless column reorder, and repeated destructive steps. Additional
+host-only tests cover complete op-to-risk mapping, scoped column IDs, schema
+bounds and non-authorizing review envelopes. The host-only tests are **not**
+evidence of native Oreslang execution.

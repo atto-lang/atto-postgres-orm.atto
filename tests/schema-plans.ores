@@ -291,6 +291,100 @@ pub routine main(): void {
     panic("destructive review manifest lost risk");
   fi
 
+
+
+  // Three-way migration planning: the accepted baseline must still match
+  // the observed v1 projection. This test does not open a database.
+  val clean_snapshot_plan = schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow current_cat);
+  if clean_snapshot_plan.is_err() || clean_snapshot_plan.unwrap().step_count() != 4 then
+    panic("clean three-way plan omitted declared changes");
+  fi
+  val noop_snapshot_plan = schema.plan_from_snapshot_checked(
+    rt borrow current_cat, rt borrow current_cat, rt borrow current_cat);
+  if noop_snapshot_plan.is_err() || noop_snapshot_plan.unwrap().step_count() != 0 then
+    panic("clean equal catalog reported drift");
+  fi
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow added_cat).is_err() then
+    panic("untracked observed table bypassed baseline drift gate");
+  fi
+  // Even when observed happens to equal desired, an unreconciled difference
+  // from the accepted baseline must fail rather than silently adopt drift.
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow wanted_cat).is_err() then
+    panic("observed desired-state drift silently adopted");
+  fi
+  val changed_live_type_result = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "name", "boolean", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  if changed_live_type_result.is_err() then panic("valid changed type fixture rejected"); fi
+  val changed_live_type = changed_live_type_result.unwrap();
+  val changed_live_cat_result = schema.catalog_checked(arr[changed_live_type]);
+  if changed_live_cat_result.is_err() then panic("valid changed observed catalog rejected"); fi
+  val changed_live_cat = changed_live_cat_result.unwrap();
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow changed_live_cat).is_err() then
+    panic("observed type drift silently adopted");
+  fi
+  val renamed_live_result = schema.table_checked("users", "renamed_users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  if renamed_live_result.is_err() then panic("valid observed table rename rejected"); fi
+  val renamed_live = renamed_live_result.unwrap();
+  val renamed_live_cat_result = schema.catalog_checked(arr[renamed_live]);
+  if renamed_live_cat_result.is_err() then panic("valid renamed observed catalog rejected"); fi
+  val renamed_live_cat = renamed_live_cat_result.unwrap();
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow renamed_live_cat).is_err() then
+    panic("observed table-name drift silently adopted");
+  fi
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow conflicting_cat).is_err() then
+    panic("observed stable-ID conflict silently adopted");
+  fi
+  if !schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow forged_cat).is_err() then
+    panic("forged observed catalog bypassed trust boundary");
+  fi
+  // Column order is not a v1 semantic change: the drift oracle should
+  // preserve stable identity and ignore harmless catalog enumeration order.
+  val reordered_table_result = schema.table_checked("users", "users", arr[
+    schema.column("legacy", "legacy", "string", true),
+    schema.column("name", "name", "string", false),
+    schema.column("id", "id", "uuid", false)
+  ]);
+  if reordered_table_result.is_err() then panic("reordered valid table rejected"); fi
+  val reordered_table = reordered_table_result.unwrap();
+  val reordered_cat_result = schema.catalog_checked(arr[reordered_table]);
+  if reordered_cat_result.is_err() then panic("reordered valid catalog rejected"); fi
+  val reordered_cat = reordered_cat_result.unwrap();
+  val reordered_plan = schema.plan_from_snapshot_checked(
+    rt borrow wanted_cat, rt borrow current_cat, rt borrow reordered_cat);
+  if reordered_plan.is_err() || reordered_plan.unwrap().step_count() != 4 then
+    panic("non-semantic observed column reordering caused false drift");
+  fi
+
+  // Reviewer manifest is never authorizing, and never repeats the same step.
+  val duplicate_review = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "legacy", "destructive"),
+    new SchemaStep("drop_column", "users", "legacy", "destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow duplicate_review).is_err() then
+    panic("duplicated destructive review operation admitted");
+  fi
+  val valid_two_ops = new SchemaPlan(arr[
+    new SchemaStep("review_column_rename", "users", "name", "manual"),
+    new SchemaStep("review_type_change", "users", "name", "manual")
+  ]);
+  if schema.review_manifest_preview_checked(rt borrow valid_two_ops).is_err() then
+    panic("distinct legitimate review operations falsely deduplicated");
+  fi
+
   stdio.println("Pure Oreslang schema-diff planning contracts passed");
   return;
 }

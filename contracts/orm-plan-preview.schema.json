@@ -29,7 +29,8 @@
       "maxItems": 2048,
       "items": {
         "$ref": "#/$defs/Step"
-      }
+      },
+      "uniqueItems": true
     }
   },
   "$defs": {

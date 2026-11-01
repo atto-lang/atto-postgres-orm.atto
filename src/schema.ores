@@ -279,6 +279,25 @@ define module schema as
   }
 
 
+  // Three-way scoped drift gate. This checks ONLY v1 table/column shape
+  // identity and does not inspect or authorize the live database. Full
+  // catalog DPM reconciliation must separately gate constraints/RLS/roles.
+  pub fnc plan_from_snapshot_checked(
+    borrow SchemaCatalog desired,
+    borrow SchemaCatalog accepted,
+    borrow SchemaCatalog observed
+  ): Result<SchemaPlan, string> {
+    val drift = diff_catalog_checked(rt borrow accepted, rt borrow observed);
+    if drift.is_err() then
+      return Err("untrusted catalog baseline or observed snapshot");
+    fi
+    if drift.unwrap().step_count() != 0 then
+      return Err("observed catalog drift; stop for evaluation");
+    fi
+    return diff_catalog_checked(rt borrow desired, rt borrow accepted);
+  }
+
+
   // A stable-ID *review* manifest, not a DPM plan and never a DDL capability.
   // Public SchemaPlan/SchemaStep constructors are not authority: verify every
   // op, risk and ID before any JSON is assembled. Strict ASCII identities
@@ -290,6 +309,7 @@ define module schema as
       + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
       + "\"scope\":\"column_shapes_only\",\"steps\":[";
     let bool first = true;
+    let mut Array<SchemaStep> seen_steps = arr[];
     for (val step of all_steps) {
       if !admitted_name(step.table_id) then
         return Err("unadmitted review table stable ID");
@@ -332,6 +352,15 @@ define module schema as
           return Err("unadmitted review column stable ID");
         fi
       fi
+      // A generated diff never contains a duplicate (op, table, column).
+      // Publicly constructed plans must not smuggle duplicate review steps.
+      for (val earlier of seen_steps) {
+        if earlier.op == step.op && earlier.table_id == step.table_id
+          && earlier.column_id == step.column_id then
+          return Err("duplicate review operation");
+        fi
+      }
+      seen_steps.add(step);
       if !first then output = output + ","; fi
       first = false;
       output = output + "{\"op\":\"" + step.op + "\",\"table_id\":\""
