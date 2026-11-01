@@ -434,3 +434,56 @@ cross-backend actor/driver conformance. The source GitHub Actions
 admission problem has not been resolved; a zero-step job is neither a
 test failure nor a passing test. Do not transfer private source across
 organizations while the unresolved source-exposure incident is open.
+
+
+## PostgreSQL 17 non-column metadata preservation gate (2026-11-01)
+
+Added `tests/pg17-catalog-metadata-e2e.sql` and guarded
+`tests/pg17-catalog-metadata-e2e.bash`. They are SQL-only test fixtures
+against a **disposable** PostgreSQL 17 instance; they are not native Oreslang
+or Declarative Migrations (DPM) execution or an approval mechanism.
+
+The fixture starts a transaction, creates a randomly named isolated schema,
+a test table, primary key and check constraint, a separate unique index,
+FORCE + ENABLE row-level security, a tenant policy, and a column default.
+It records PostgreSQL catalog-projected policy expressions and default
+expressions before applying a nullable-column addition. It requires that
+`pg_class`, `pg_policy`, `pg_constraint`, `pg_index`, and `pg_attrdef`
+continue to match the reviewed baseline after the addition.
+
+Seven mutation cases must fail with SQLSTATE 23514 **and the exact**
+`PROTECTED_CATALOG_DRIFT` diagnostic: RLS disable, FORCE RLS removal,
+policy removal, policy weakening, unique-index drop, check-constraint
+drop, and column-default change. PL/pgSQL exception subtransactions
+roll back the hostile mutations, and the outer transaction always
+`ROLLBACK`s. The final query must show that the temporary schema
+did not survive. This covers selected catalog objects; grants,
+extensions, triggers, arbitrary index definitions and cross-schema
+dependencies remain outside this fixture's authority.
+
+Both the PostgreSQL 17 service workflow and the host-contract workflow
+register the new files; `orm-schema-contract.yml` now discovers all
+`test_*.py` files. A standalone Python module adds **three authored
+host-only methods** with source guards, Bash syntax checking and simulated
+`psql` response mutation. The consolidated authored suite has
+**59 Python test methods** (56 schema + 3 metadata).
+
+**Executed locally on an isolated host:** exact wrapper Git blob
+`778432466819013cc3f558693c2c46c8052da653` matched
+`git hash-object`; `bash -n` passed; **13/13 fake-psql subprocess
+scenarios passed** (no opt-in/DSN without contact, PG16/PG18 and malformed
+server versions, version-probe failure, correct mock receipt, forged/extra/
+incomplete receipt and SQL-subprocess failure). Exact-tree inspection
+also passed **20/20 source consistency checks** including all seven
+drift-rejection blocks and correct CI registration. These do **not**
+execute the fixture's actual SQL or certify a PostgreSQL server.
+
+**Unverified release gates:** real PostgreSQL 17 service execution;
+actual pinned JDK25 Oreslang guest execution, live driver and actor
+ownership; independently executed TypeSpec/JSON Schema parity and
+full DPM catalog/approval; all five backend parity. GitHub source
+Actions run IDs 41280293922 and 41280293938 failed before runner
+allocation (`runner_id=0`, `steps=[]`); 41280290489 contained
+zero jobs. The private-source cross-org export hold from security
+issue #22 remains in force. Keep PR draft; no production database
+or source `main` was changed.
