@@ -11,6 +11,8 @@ on:
       - 'tests/pg17-catalog-readback-e2e.sql'
       - 'tests/pg17-catalog-readback-e2e.bash'
       - 'tests/pg17-migration-lock-e2e.bash'
+      - 'tests/pg17-migration-history-e2e.sql'
+      - 'tests/pg17-migration-history-e2e.bash'
       - 'contracts/**'
       - '.github/workflows/orm-schema-contract.yml'
   workflow_dispatch:
