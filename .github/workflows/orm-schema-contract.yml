@@ -37,7 +37,7 @@ jobs:
               'test_schema_contract.py': 30,
               'test_orm_semantics_host.py': 8,
               'test_orm_pairwise_matrix_host.py': 10,
-              'test_orm_admission_host.py': 22,
+              'test_orm_admission_host.py': 23,
           }
           runner = unittest.TextTestRunner(verbosity=2)
           count = 0
