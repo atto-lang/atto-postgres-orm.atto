@@ -385,6 +385,54 @@ pub routine main(): void {
     panic("distinct legitimate review operations falsely deduplicated");
   fi
 
+  // Publicly constructed plans cannot smuggle contradictory operations
+  // into a preview, even when each individual op/risk pair is valid.
+  val drop_table_and_edit = new SchemaPlan(arr[
+    new SchemaStep("review_drop_table", "users", "", "destructive"),
+    new SchemaStep("review_column_rename", "users", "name", "manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow drop_table_and_edit).is_err() then
+    panic("drop table and column edit conflict admitted");
+  fi
+  val edit_then_create = new SchemaPlan(arr[
+    new SchemaStep("review_type_change", "users", "name", "manual"),
+    new SchemaStep("review_create_table", "users", "", "manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow edit_then_create).is_err() then
+    panic("create table and column edit conflict admitted in reverse order");
+  fi
+  val drop_then_rename = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "name", "destructive"),
+    new SchemaStep("review_column_rename", "users", "name", "manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow drop_then_rename).is_err() then
+    panic("drop column and rename conflict admitted");
+  fi
+  val rename_then_add = new SchemaPlan(arr[
+    new SchemaStep("review_column_rename", "users", "name", "manual"),
+    new SchemaStep("add_nullable_column", "users", "name", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow rename_then_add).is_err() then
+    panic("add column and rename conflict admitted in reverse order");
+  fi
+  val conflicting_nullability = new SchemaPlan(arr[
+    new SchemaStep("set_not_null", "users", "name", "preflight"),
+    new SchemaStep("drop_not_null", "users", "name", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow conflicting_nullability).is_err() then
+    panic("opposite nullability review actions admitted");
+  fi
+  val legitimate_review_bundle = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename", "users", "", "manual"),
+    new SchemaStep("review_column_rename", "users", "name", "manual"),
+    new SchemaStep("review_type_change", "users", "name", "manual"),
+    new SchemaStep("set_not_null", "users", "name", "preflight"),
+    new SchemaStep("drop_column", "users", "legacy", "destructive")
+  ]);
+  if schema.review_manifest_preview_checked(rt borrow legitimate_review_bundle).is_err() then
+    panic("legitimate independent review operations rejected");
+  fi
+
   stdio.println("Pure Oreslang schema-diff planning contracts passed");
   return;
 }

@@ -216,3 +216,20 @@ ASCII identifier admission boundary, complete eight-kind whitelist, rejected
 SQL/database type strings, and every operation's inability to add SQL,
 approval flags, or expanded scope. These are validator/source-level checks,
 not PostgreSQL, TypeSpec or native Oreslang execution evidence.
+
+## Cross-item contradiction gate (stage 6, review-only)
+
+The pure Oreslang review manifest now refuses conflicting public
+`SchemaStep` combinations: a table creation/deletion cannot coexist with
+other steps for that table, a column add/drop cannot coexist with operations
+for that same stable column, and opposite nullability edits cannot coexist.
+Distinct table-renames, column-renames, type changes, and a single nullability
+change remain reviewable together. Validation is independent of step order.
+
+JSON Schema Draft 2020-12 `uniqueItems` only catches identical objects; it
+does **not** encode key uniqueness or incompatible combinations across an
+array. Host-only semantic checks exercise these extra invariants separately.
+Neither the host validator nor the review preview is trusted migration
+authority. Full DPM catalog verification, peer TypeSpec semantic parity,
+native Oreslang compilation, and real PostgreSQL 17 tests remain blocked
+release gates.

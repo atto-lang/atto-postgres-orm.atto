@@ -360,6 +360,30 @@ define module schema as
           return Err("duplicate review operation");
         fi
       }
+      // Semantic conflicts cannot be expressed with JSON Schema uniqueItems.
+      // Do not export a publicly fabricated plan which mixes a table
+      // create/drop with other edits to that table, or a column create/drop
+      // with edits to the same stable column. A rename + type + nullability
+      // change on an existing column remains a legitimate review proposal.
+      for (val earlier of seen_steps) {
+        if earlier.table_id == step.table_id then
+          if earlier.op == "review_create_table" || earlier.op == "review_drop_table"
+            || step.op == "review_create_table" || step.op == "review_drop_table" then
+            return Err("conflicting table create/drop review operations");
+          fi
+          if step.column_id != "" && earlier.column_id == step.column_id then
+            if earlier.op == "drop_column" || earlier.op == "add_nullable_column"
+              || earlier.op == "add_required_column" || step.op == "drop_column"
+              || step.op == "add_nullable_column" || step.op == "add_required_column" then
+              return Err("conflicting column create/drop review operations");
+            fi
+            if (earlier.op == "set_not_null" && step.op == "drop_not_null")
+              || (earlier.op == "drop_not_null" && step.op == "set_not_null") then
+              return Err("conflicting nullability review operations");
+            fi
+          fi
+        fi
+      }
       seen_steps.add(step);
       if !first then output = output + ","; fi
       first = false;
