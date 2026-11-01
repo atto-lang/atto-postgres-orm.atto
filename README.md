@@ -1,3 +1,20 @@
+## Five-backend ORM conformance (not yet verified)
+
+The identical Oreslang planner modules `src/schema.ores` and `src/pg.ores`
+are being targeted at Java, LLVM, Wasm, Cranelift and .NET. The current
+draft requires **25 compiled native guest outcomes** (five test suites per
+toolchain), including `tests/orm-cross-backend.ores` which imports both
+modules. This is **not a claim of five-backend execution**: Cranelift
+currently lacks the ORM's module/class/Array/Result frontend, and the other
+four backends require independently reviewed exact-head guest evidence.
+
+See [five-backend admission and blockers](docs/FIVE_BACKEND_ORM_CONFORMANCE.md)
+and [cross-backend conformance tracking](https://github.com/ores-truffle-oreslang/oreslang-platform-conformance/issues/285).
+Run `python3 scripts/verify-orm-five-backend-receipts.py` for a **source-only
+NOT_VERIFIED preflight**, never a native release verdict. Private-source
+cross-organization mirroring remains prohibited while security incident
+#22 is open.
+
 # postgres-orm.ores
 
 Native Oreslang foundation for a PostgreSQL ORM: code-first DDL composition,
