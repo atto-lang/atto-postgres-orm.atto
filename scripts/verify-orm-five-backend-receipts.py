@@ -68,7 +68,7 @@ def load_manifest():
     require(sources == ["src/schema.ores", "src/pg.ores"],
             "ORM source compilation scope must include schema and SQL planner")
     cases = manifest["cases"]
-    require(len(cases) == 4, "must retain four independent native suites")
+    require(len(cases) == 5, "must retain five independent native suites")
     expected = {
         "typed-ddl-planner": ("tests/plans.ores",
                               "Postgres SQL planning contracts passed\n"),
@@ -78,9 +78,11 @@ def load_manifest():
                                "Pure Oreslang adversarial schema contracts passed\n"),
         "invariant-schema": ("tests/schema-invariants.ores",
                              "Pure Oreslang schema invariant and metamorphic contracts passed\n"),
+        "combined-orm-modules": ("tests/orm-cross-backend.ores",
+                                 "Pure Oreslang combined ORM portability contracts passed\n"),
     }
     require({x["id"]: (x["source"], x["expected_stdout"]) for x in cases}
-            == expected and len({x["id"] for x in cases}) == 4,
+            == expected and len({x["id"] for x in cases}) == 5,
             "native suite identity or expected output modified")
     for name in sources + [entry["source"] for entry in cases]:
         file = ROOT / name
@@ -90,10 +92,14 @@ def load_manifest():
     # fixture whose matching stdout could be misreported as ORM parity.
     for case in cases:
         raw = (ROOT / case["source"]).read_text(encoding="utf-8")
-        module = "pg" if case["id"] == "typed-ddl-planner" else "schema"
-        edge = "import module " + module + " from '../src/" + module + "';"
-        require(edge in raw, "native guest no longer imports ORM module: "
-                + case["id"])
+        modules = ("pg",) if case["id"] == "typed-ddl-planner" else (
+            ("pg", "schema") if case["id"] == "combined-orm-modules"
+            else ("schema",)
+        )
+        for module in modules:
+            edge = "import module " + module + " from '../src/" + module + "';"
+            require(edge in raw, "native guest no longer imports ORM module: "
+                    + case["id"] + "/" + module)
         printed = 'stdio.println("' + case["expected_stdout"].strip() + '")'
         require(printed in raw, "native guest success oracle missing: "
                 + case["id"])
@@ -177,7 +183,7 @@ def main(argv=None):
     manifest = load_manifest()
     if opts.receipts is None:
         require(not opts.orm_head, "unexpected ORM HEAD without receipts")
-        print("NOT_VERIFIED: 5 toolchains x 4 suites = 20 compiled guest receipts required")
+        print("NOT_VERIFIED: 5 toolchains x 5 suites = 25 compiled guest receipts required")
     else:
         number = verify_receipts(manifest, opts.receipts, opts.orm_head)
         print(f"RECEIPT_SHAPES_ACCEPTED_PENDING_INDEPENDENT_NATIVE_REVIEW: {number}")
