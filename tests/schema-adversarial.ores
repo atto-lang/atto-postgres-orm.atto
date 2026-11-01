@@ -1,0 +1,188 @@
+// Pure Oreslang hostile-input regression matrix; not runtime verified.
+import module schema from '../src/schema';
+pub routine main(): void {
+  if !schema.admitted_name("a") then panic("valid identifier rejected a"); fi
+  if !schema.admitted_name("_underscore") then panic("valid identifier rejected _underscore"); fi
+  if !schema.admitted_name("name_00") then panic("valid identifier rejected name_00"); fi
+  if !schema.admitted_name("Z_9") then panic("valid identifier rejected Z_9"); fi
+  if !schema.admitted_name("table_name__123") then panic("valid identifier rejected table_name__123"); fi
+  if schema.admitted_name("") then panic("malformed identifier admitted 0"); fi
+  if schema.admitted_name("0abc") then panic("malformed identifier admitted 1"); fi
+  if schema.admitted_name("a.b") then panic("malformed identifier admitted 2"); fi
+  if schema.admitted_name("a|b") then panic("malformed identifier admitted 3"); fi
+  if schema.admitted_name("a;b") then panic("malformed identifier admitted 4"); fi
+  if schema.admitted_name("a b") then panic("malformed identifier admitted 5"); fi
+  if schema.admitted_name("a\"b") then panic("malformed identifier admitted 6"); fi
+  if schema.admitted_name("a\nb") then panic("malformed identifier admitted 7"); fi
+  if schema.admitted_name("é") then panic("malformed identifier admitted 8"); fi
+  if schema.admitted_name("name🥑") then panic("malformed identifier admitted 9"); fi
+  if !schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then panic("63-byte identifier rejected"); fi
+  if schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then panic("64-byte identifier admitted"); fi
+  for (val kind of arr["uuid","string","int32","int64","boolean","json","timestamp","bytes"]) {
+    if !schema.admitted_kind(kind) then panic("valid neutral kind rejected"); fi
+  }
+  for (val kind of arr["UUID","serial","float","text","int","nullable","varchar(20)","uuid;DROP"]) {
+    if schema.admitted_kind(kind) then panic("unknown neutral kind admitted"); fi
+  }
+  val id = schema.column("id","id","uuid",false);
+  val title = schema.column("title","title","string",false);
+  val obsolete = schema.column("obsolete","obsolete","boolean",true);
+  val actual_r = schema.table_checked("docs","docs",arr[id,title,obsolete]);
+  if actual_r.is_err() then panic("valid observed table rejected"); fi
+  val actual = actual_r.unwrap();
+  val desired_r = schema.table_checked("docs","docs",arr[
+    id, schema.column("title","display_title","string",true),
+    schema.column("flag","flag","boolean",false),
+    schema.column("note","note","string",true)]);
+  if desired_r.is_err() then panic("valid desired table rejected"); fi
+  val desired = desired_r.unwrap();
+  val mixed = schema.diff_checked(rt borrow desired, rt borrow actual);
+  if mixed.is_err() then panic("mixed drift rejected"); fi
+  if mixed.unwrap().step_count() != 5 then panic("mixed drift step count wrong"); fi
+  if mixed.unwrap().step_at(0).unwrap().op != "review_column_rename" then panic("mixed diff operation 0"); fi
+  if mixed.unwrap().step_at(0).unwrap().risk != "manual" then panic("mixed diff risk 0"); fi
+  if mixed.unwrap().step_at(1).unwrap().op != "drop_not_null" then panic("mixed diff operation 1"); fi
+  if mixed.unwrap().step_at(1).unwrap().risk != "safe" then panic("mixed diff risk 1"); fi
+  if mixed.unwrap().step_at(2).unwrap().op != "add_required_column" then panic("mixed diff operation 2"); fi
+  if mixed.unwrap().step_at(2).unwrap().risk != "preflight" then panic("mixed diff risk 2"); fi
+  if mixed.unwrap().step_at(3).unwrap().op != "add_nullable_column" then panic("mixed diff operation 3"); fi
+  if mixed.unwrap().step_at(3).unwrap().risk != "safe" then panic("mixed diff risk 3"); fi
+  if mixed.unwrap().step_at(4).unwrap().op != "drop_column" then panic("mixed diff operation 4"); fi
+  if mixed.unwrap().step_at(4).unwrap().risk != "destructive" then panic("mixed diff risk 4"); fi
+  if !mixed.unwrap().has_blockers() then panic("mixed plan blockers not detected"); fi
+  if !mixed.unwrap().step_at(-1).is_err() then panic("negative step index admitted"); fi
+  if !mixed.unwrap().step_at(5).is_err() then panic("out-of-bounds step index admitted"); fi
+  val rename_r = schema.table_checked("docs","documents",arr[id,title,obsolete]);
+  if rename_r.is_err() then panic("valid renamed table rejected"); fi
+  val renamed = rename_r.unwrap();
+  val ren = schema.diff_checked(rt borrow renamed, rt borrow actual);
+  if ren.is_err() || ren.unwrap().step_count() != 1 then panic("physical rename misclassified"); fi
+  if ren.unwrap().step_at(0).unwrap().op != "review_table_rename" then panic("stable identity rename not manually flagged"); fi
+  if ren.unwrap().step_at(0).unwrap().risk != "manual" then panic("physical rename risk wrong"); fi
+  val nom_a_r = schema.table_checked("names","before",arr[schema.column("name","old_name","string",false)]);
+  val nom_b_r = schema.table_checked("names","after",arr[schema.column("name","new_name","string",false)]);
+  if nom_a_r.is_err() || nom_b_r.is_err() then panic("valid nominal fixtures rejected"); fi
+  val nom_a = nom_a_r.unwrap();
+  val nom_b = nom_b_r.unwrap();
+  val model_a = schema.model_source_preview_checked(rt borrow nom_a);
+  val model_b = schema.model_source_preview_checked(rt borrow nom_b);
+  if model_a.is_err() || model_b.is_err() then panic("nominal preview rejected"); fi
+  if model_a.unwrap() != model_b.unwrap() then panic("nominal class incorrectly bound to physical rename"); fi
+  val desc_a = schema.table_descriptor_source_preview_checked(rt borrow nom_a);
+  val desc_b = schema.table_descriptor_source_preview_checked(rt borrow nom_b);
+  if desc_a.is_err() || desc_b.is_err() then panic("descriptor preview rejected"); fi
+  if desc_a.unwrap() == desc_b.unwrap() then panic("descriptor failed to preserve physical rename"); fi
+  for (val kind of arr["uuid","int32","int64","json","timestamp","bytes"]) {
+    val probe = schema.table_checked("opaque","opaque",arr[schema.column("payload","payload",kind,false)]);
+    if probe.is_err() then panic("valid opaque fixture rejected"); fi
+    val value = probe.unwrap();
+    if !schema.model_source_preview_checked(rt borrow value).is_err() then panic("unsupported scalar silently coerced"); fi
+  }
+  val nullable_r = schema.table_checked("n","n",arr[schema.column("v","v","boolean",true)]);
+  if nullable_r.is_err() then panic("nullable fixture rejected"); fi
+  val nullable_v = nullable_r.unwrap();
+  if !schema.model_source_preview_checked(rt borrow nullable_v).is_err() then panic("nullable Option contract silently dropped"); fi
+  let mut Array<SchemaColumn> columns = arr[id,title];
+  val saved_r = schema.table_checked("saved","saved",columns);
+  if saved_r.is_err() then panic("valid snapshot table rejected"); fi
+  columns.add(obsolete);
+  if saved_r.unwrap().columns().size != 2 then panic("mutable caller columns changed snapshot"); fi
+  val copied = saved_r.unwrap().columns();
+  copied.add(obsolete);
+  if saved_r.unwrap().columns().size != 2 then panic("returned columns alias snapshot"); fi
+  val forged = new SchemaTable("docs","docs",arr[schema.column("x","x","string",false),schema.column("x","y","string",false)]);
+  if !schema.model_source_preview_checked(rt borrow forged).is_err() then panic("forged duplicate ID entered model generation"); fi
+  if !schema.table_descriptor_source_preview_checked(rt borrow forged).is_err() then panic("forged duplicate ID entered descriptor generation"); fi
+  let mut Array<SchemaColumn> bulk = arr[];
+  for (val n of arr["col00","col01","col02","col03","col04","col05","col06","col07","col08","col09","col10","col11","col12","col13","col14","col15","col16","col17","col18","col19","col20","col21","col22","col23","col24","col25","col26","col27","col28","col29","col30","col31","col32","col33","col34","col35","col36","col37","col38","col39","col40","col41","col42","col43","col44","col45","col46","col47","col48","col49","col50","col51","col52","col53","col54","col55","col56","col57","col58","col59","col60","col61","col62","col63"]) {
+    bulk.add(schema.column(n,n,"string",false));
+  }
+  val bulk_r = schema.table_checked("bulk","bulk",bulk);
+  if bulk_r.is_err() then panic("64-column boundary rejected"); fi
+  bulk.add(schema.column("col64","col64","string",false));
+  if !schema.table_checked("bulk","bulk",bulk).is_err() then panic("65 columns admitted"); fi
+  if bulk_r.unwrap().columns().size != 64 then panic("bulk input mutated retained table"); fi
+  val current_cat_r = schema.catalog_checked(arr[actual]);
+  val next_cat_r = schema.catalog_checked(arr[actual,nom_a]);
+  if current_cat_r.is_err() || next_cat_r.is_err() then panic("valid catalog fixtures rejected"); fi
+  val current_cat = current_cat_r.unwrap();
+  val next_cat = next_cat_r.unwrap();
+  val created = schema.diff_catalog_checked(rt borrow next_cat, rt borrow current_cat);
+  if created.is_err() || created.unwrap().step_count() != 1 then panic("table creation planning broken"); fi
+  if created.unwrap().step_at(0).unwrap().risk != "manual" then panic("table creation escaped review"); fi
+  val deleted = schema.diff_catalog_checked(rt borrow current_cat, rt borrow next_cat);
+  if deleted.is_err() || deleted.unwrap().step_count() != 1 then panic("table removal planning broken"); fi
+  if deleted.unwrap().step_at(0).unwrap().risk != "destructive" then panic("table drop risk downgraded"); fi
+  val duplicate_name = new SchemaTable("different","docs",arr[id]);
+  if !schema.catalog_checked(arr[actual,duplicate_name]).is_err() then panic("duplicate physical table name admitted"); fi
+  val mismatch_cat_r = schema.catalog_checked(arr[duplicate_name]);
+  if mismatch_cat_r.is_err() then panic("alternate stable ID fixture invalid"); fi
+  val mismatch_cat = mismatch_cat_r.unwrap();
+  if !schema.diff_catalog_checked(rt borrow mismatch_cat, rt borrow current_cat).is_err() then panic("name collision bypassed stable ID"); fi
+  let mut Array<SchemaTable> input_tables = arr[actual];
+  val saved_cat_r = schema.catalog_checked(input_tables);
+  if saved_cat_r.is_err() then panic("saved catalog rejected"); fi
+  input_tables.add(nom_a);
+  if saved_cat_r.unwrap().tables().size != 1 then panic("mutable caller tables changed snapshot"); fi
+  val returned_tables = saved_cat_r.unwrap().tables();
+  returned_tables.add(nom_a);
+  if saved_cat_r.unwrap().tables().size != 1 then panic("returned tables alias snapshot"); fi
+  let mut Array<SchemaStep> input_steps = arr[new SchemaStep("add_nullable_column","docs","note","safe")];
+  val plan = new SchemaPlan(input_steps);
+  input_steps.add(new SchemaStep("drop_column","docs","id","destructive"));
+  if plan.step_count() != 1 then panic("mutable caller steps changed plan"); fi
+  val returned_steps = plan.steps();
+  returned_steps.add(new SchemaStep("drop_column","docs","id","destructive"));
+  if plan.step_count() != 1 then panic("returned steps alias plan"); fi
+  val allowed = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","docs","","manual"),
+    new SchemaStep("review_create_table","docs","","manual"),
+    new SchemaStep("review_drop_table","docs","","destructive"),
+    new SchemaStep("review_column_rename","docs","field","manual"),
+    new SchemaStep("review_type_change","docs","field","manual"),
+    new SchemaStep("drop_not_null","docs","field","safe"),
+    new SchemaStep("add_nullable_column","docs","field","safe"),
+    new SchemaStep("set_not_null","docs","field","preflight"),
+    new SchemaStep("add_required_column","docs","field","preflight"),
+    new SchemaStep("drop_column","docs","field","destructive")
+  ]);
+  val manifest = schema.review_manifest_preview_checked(rt borrow allowed);
+  if manifest.is_err() then panic("valid 10-operation review matrix rejected"); fi
+  if manifest.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == manifest.unwrap() then panic("manifest lacks stopped decision"); fi
+  if manifest.unwrap().replace_literal("approved","") == manifest.unwrap() then panic("manifest dropped approval marker"); fi
+  for (val invalid of arr[
+    new SchemaStep("review_table_rename","docs","","safe"),
+    new SchemaStep("review_create_table","docs","","safe"),
+    new SchemaStep("review_drop_table","docs","","safe"),
+    new SchemaStep("review_column_rename","docs","field","safe"),
+    new SchemaStep("review_type_change","docs","field","safe"),
+    new SchemaStep("drop_not_null","docs","field","manual"),
+    new SchemaStep("add_nullable_column","docs","field","manual"),
+    new SchemaStep("set_not_null","docs","field","safe"),
+    new SchemaStep("add_required_column","docs","field","safe"),
+    new SchemaStep("drop_column","docs","field","safe")
+  ]) {
+    val wrong = new SchemaPlan(arr[invalid]);
+    if !schema.review_manifest_preview_checked(rt borrow wrong).is_err() then panic("forged operation risk accepted"); fi
+  }
+  val invalid0 = new SchemaPlan(arr[new SchemaStep("DROP TABLE docs","docs","field","manual")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid0).is_err() then panic("invalid step admitted 0"); fi
+  val invalid1 = new SchemaPlan(arr[new SchemaStep("drop_column","docs;DROP","field","destructive")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid1).is_err() then panic("invalid step admitted 1"); fi
+  val invalid2 = new SchemaPlan(arr[new SchemaStep("drop_column","docs","x\"};","destructive")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid2).is_err() then panic("invalid step admitted 2"); fi
+  val invalid3 = new SchemaPlan(arr[new SchemaStep("drop_column","docs","","destructive")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid3).is_err() then panic("invalid step admitted 3"); fi
+  val invalid4 = new SchemaPlan(arr[new SchemaStep("review_create_table","docs","field","manual")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid4).is_err() then panic("invalid step admitted 4"); fi
+  val invalid5 = new SchemaPlan(arr[new SchemaStep("review_drop_table","","","destructive")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid5).is_err() then panic("invalid step admitted 5"); fi
+  val invalid6 = new SchemaPlan(arr[new SchemaStep("drop_column","docs","field","DESTRUCTIVE")]);
+  if !schema.review_manifest_preview_checked(rt borrow invalid6).is_err() then panic("invalid step admitted 6"); fi
+  val empty = new SchemaPlan(arr[]);
+  val empty_manifest = schema.review_manifest_preview_checked(rt borrow empty);
+  if empty_manifest.is_err() then panic("empty review plan unexpectedly rejected"); fi
+  if empty_manifest.unwrap() != "{\"schema\":\"ores.orm.plan-preview/v1\",\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,\"scope\":\"column_shapes_only\",\"steps\":[]}" then panic("empty plan lost exact deny-by-default envelope"); fi
+  stdio.println("Pure Oreslang adversarial schema contracts passed");
+  return;
+}
