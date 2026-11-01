@@ -525,3 +525,55 @@ mirrored during this hardening work. The Actions admission reason is still
 unknown (issue `oreslang-source.java` #963); an owner must check
 billing, eligibility, private Actions policy and runner groups before
 claiming lack of minutes.
+
+
+## 2026-11-01 source-local safety audit (private-source transfer blocked)
+
+The source CI runner-admission reason remains unknown. In
+`oreslang-platform-conformance` security incident #22, private Oreslang
+source export to another organization is explicitly prohibited until
+independent security review and authorization. A Git tree mirrored with
+API calls and no secrets is **still a private-source transfer**, including
+historical Git object and Actions artifact retention. Therefore the
+alternate-org mirror shortcut was **not performed**, and no public or
+private carrier repository received ORM source from this audit.
+
+**New exact-head source hardening:**
+- The PG17 protected-metadata SQL fixture now checks the original
+  `pg_get_indexdef` and `pg_get_constraintdef` definitions, plus exact
+  index and PK/CHECK constraint counts. Four new negative cases challenge
+  same-name unique-index substitution, CHECK substitution, primary-key
+  substitution and an unexpected additional index. There are now **13**
+  distinct adversarial mutation blocks, each requiring the exact
+  `PROTECTED_CATALOG_DRIFT` SQLSTATE 23514 result.
+- The host Python schema workflow is SHA-pinned to GitHub-verified
+  `actions/checkout` v4.2.2 and `actions/setup-python` v5.6.0 Git
+  commit objects, uses `persist-credentials: false`, and syntax-checks
+  every `tests/pg17-*.bash` shell. The private host verifier also
+  watches all PG17 test fixtures instead of reporting stale test counts.
+- `tests/test_workflow_security.py` adds five source-only CI policy
+  tests for action pins, read-only tokens, credentials, complete SQL
+  fixture registration, and the zero-checkout runner canary. It
+  recognizes actions nested inside named steps, not just `- uses:`.
+- Reconciled the latest stacked #13 parent differential-oracle module.
+  `tests/test_catalog_differential_host.py` now enforces review-step
+  `uniqueItems` in the independent reference oracle, with explicit
+  adjacent and nonadjacent duplicate tests. The full source-authored
+  Python suite now has **70 test methods** across four files.
+
+**Executed, narrow evidence:** an isolated in-memory independent
+JavaScript structural evaluator compared **706 mutation inputs** against
+the exact private GitHub JSON Schema and example blobs, yielding
+**706/706 matching expected outcomes**. This model implements only
+the used JSON Schema subset; it is **not** the official Python
+Draft 2020-12 validator, TypeSpec compiler, real PostgreSQL 17,
+a compiled Oreslang guest or a full migration-conformance proof.
+Exact-source assertions also verified schema/SQL mutation coverage,
+the 13 fail-closed diagnostic guards and the workflow-action pins.
+Original workflow jobs continue to fail before runner allocation.
+
+**First next executable gate:** administrator resolution of private
+Actions admission / authorization on the source organization, followed
+by an actual stepful, exact-head source-local host Python suite,
+PG17 disposable-service workflow, and pinned native guest verifier
+(in that order). Keep PR draft; no production DB or `main` changed.
