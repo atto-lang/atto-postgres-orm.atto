@@ -17,12 +17,12 @@ enum ColumnKind {
 model Column {
   @minLength(1)
   @maxLength(63)
-  @pattern("^[A-Za-z_][A-Za-z0-9_]*$")
+  @pattern("^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])")
   stable_id: string;
 
   @minLength(1)
   @maxLength(63)
-  @pattern("^[A-Za-z_][A-Za-z0-9_]*$")
+  @pattern("^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])")
   name: string;
 
   kind: ColumnKind;
@@ -32,12 +32,12 @@ model Column {
 model Table {
   @minLength(1)
   @maxLength(63)
-  @pattern("^[A-Za-z_][A-Za-z0-9_]*$")
+  @pattern("^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])")
   stable_id: string;
 
   @minLength(1)
   @maxLength(63)
-  @pattern("^[A-Za-z_][A-Za-z0-9_]*$")
+  @pattern("^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])")
   name: string;
 
   @minItems(1)

@@ -258,3 +258,95 @@ must not report a green host receipt. This suite cannot substitute for
 pinned native guest execution, TypeSpec emitter parity, a reviewed
 stable-ID mapping ledger, full PostgreSQL catalog introspection or DPM
 migration replay/rollback/locking evidence.
+
+## Strict UTF-8 review-only JSON admission (stage 8; host-only)
+
+The new scripts/orm_admission_host.py is a **host-only**, read-only
+boundary for imported catalog and review JSON. Its fail-closed checks are:
+
+1. Accept exact UTF-8 bytes bounded at 8 MiB. Reject malformed JSON,
+   non-finite numeric constants, nested duplicate JSON keys (including
+   Unicode-escaped aliases), and excessive parser nesting.
+2. Validate the closed JSON Schema Draft 2020-12 envelope selected by a
+   fixed kind (catalog or review).
+3. Verify stable-ID and physical-name uniqueness and cross-step
+   contradictions via scripts/orm_semantics_host.py.
+
+Review-only examples (no database access or SQL):
+
+    python scripts/orm_admission_host.py --kind catalog --input contracts/examples/current.catalog.json
+    python scripts/orm_admission_host.py --kind review --input contracts/examples/plan-preview.json
+
+The CLI exits 0 only on admitted review data and 2 on an invalid payload
+or input-file I/O failure. A zero exit or ORM_HOST_REVIEW_ONLY_OK marker
+**never authorizes SQL generation, approval or migration execution.**
+This script contains no DB connection, DDL capability or SQL emitter.
+
+### Portable identifier boundary correction
+
+The original identifier ^...$ regex can match before a terminal newline,
+which the pure-Oreslang admitted_name implementation rejects. The JSON
+Schema catalog/preview and TypeSpec peer patterns now use an explicit
+end-of-input negative lookahead, rather than relying on the $ anchor;
+the optional empty column ID is also strictly anchored.
+
+Tests reject suffixes LF, CR, U+2028 and U+2029 for catalog table and
+column IDs/names and for review-step table/column IDs. This is a
+peer-contract modification: TypeSpec compiler/emitter equivalence remains
+a separate mandatory unverified gate.
+
+The 23 new admission-test methods cover CLI positive/negative behavior,
+duplicate keys, huge/deep inputs, review contradictions, forged approvals
+and portable identifier regressions. The host CI workflow now requires
+at least 71 discovered host test methods across four suites and exercises
+the checked-in catalog/preview JSON files through the CLI.
+
+None of these host results establishes pinned native Oreslang guest
+execution, TypeSpec/TJSV parity, PostgreSQL 17 introspection or DPM
+migration replay/rollback/locking. Do not transfer private source to
+an alternate organization while the existing incident hold applies.
+Keep changes in draft pending native and database execution evidence.
+
+
+## Offline PostgreSQL 17 catalog projection and stable-ID ledger (stage 9)
+
+The HOST-ONLY `scripts/orm_pg_catalog_projection_host.py` converts an
+illustrative PostgreSQL-17-flavored capture plus an explicitly supplied
+stable-ID ledger into the existing runtime-neutral **column-shapes-only**
+catalog. It performs **no database I/O, read-only query, or SQL execution**.
+
+The checked-in sample inputs are
+`contracts/examples/pg17-capture.offline.json` and
+`contracts/examples/pg17-ledger.offline.json`. They are invented fixtures,
+NOT evidence of a real PostgreSQL database or a reviewed production ledger.
+
+Fail-closed checks require PostgreSQL 17 version pinning, identical cluster
+system identifier and database OID, exact one-to-one table OID and column
+attnum mappings, no duplicates, an admitted public-schema ordinary table
+and conservative physical identifier/type admission. A changed physical name
+retains its existing stable ID **only when the same reviewed scoped OID/attnum
+mapping is present**; names alone never infer identities.
+
+No reported RLS, policies, indexes, constraints, defaults, generated columns,
+identity columns, dropped columns, views, non-public schemas, partitioned
+tables or other out-of-scope features are silently erased. These require
+a full-catalog reconciliation and are rejected by the v1 projection.
+The final normalized result is validated through the existing STRICT host
+JSON Schema + cross-item admission boundary and deterministically sorted.
+
+**Important limits:** Both input objects are untrusted. An empty reported
+out-of-scope inventory CANNOT prove it is complete or independently captured.
+PostgreSQL OIDs/attnums and a cluster identifier are scoped to one database
+instance and may not survive dump/restore. The fixture does not attest a
+real catalog, discover constraints/RLS or establish full-database parity.
+No application actor receives DDL permissions and no migration manifest can
+authorize SQL execution.
+
+`tests/test_pg_catalog_projection_host.py` adds 27 host-only test methods,
+covering the checked-in fixture, stale/duplicate OID and attnum ledgers,
+non-ASCII names, source immutability, deterministic order, unsupported
+types, RLS, defaults and other out-of-scope objects. Source CI must now
+discover and execute at least 98 host methods in five suites; the actual
+runner must execute steps before any PASS claim. Native Oreslang, TypeSpec
+emission, PostgreSQL read-only extraction, DPM replay, actor/RLS lifecycle,
+locking, rollback and backend parity all remain separate release gates.

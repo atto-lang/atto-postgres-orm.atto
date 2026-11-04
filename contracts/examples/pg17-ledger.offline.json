@@ -1,0 +1,21 @@
+{
+  "version": "ores.orm.pg17-ledger/v1",
+  "cluster_system_identifier": "7311123456789000000",
+  "database_oid": 16385,
+  "table_mappings": [
+    {
+      "table_oid": 10010,
+      "stable_id": "users",
+      "column_mappings": [
+        {
+          "attnum": 1,
+          "stable_id": "id"
+        },
+        {
+          "attnum": 2,
+          "stable_id": "name"
+        }
+      ]
+    }
+  ]
+}
