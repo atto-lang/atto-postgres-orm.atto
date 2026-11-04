@@ -342,6 +342,67 @@ pub routine main(): void {
   if empty_snapshot_r.is_err() || empty_snapshot_r.unwrap().step_count() != 0 then
     panic("empty catalog incorrectly reported drift");
   fi
+  // Independent pairwise contract: a public review plan is data, not
+  // an execution capability. Cross-item validation is order independent.
+  val conflicting_table_lifecycle = new SchemaPlan(arr[
+    new SchemaStep("review_create_table","docs","","manual"),
+    new SchemaStep("review_drop_table","docs","","destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow conflicting_table_lifecycle).is_err() then
+    panic("table creation and deletion admitted together");
+  fi
+  val conflicting_table_lifecycle_reverse = new SchemaPlan(arr[
+    new SchemaStep("review_drop_table","docs","","destructive"),
+    new SchemaStep("review_create_table","docs","","manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow conflicting_table_lifecycle_reverse).is_err() then
+    panic("reverse table creation and deletion admitted together");
+  fi
+  val competing_adds = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","docs","new_field","safe"),
+    new SchemaStep("add_required_column","docs","new_field","preflight")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow competing_adds).is_err() then
+    panic("same stable column added twice with contradictory nullability");
+  fi
+  val competing_adds_reverse = new SchemaPlan(arr[
+    new SchemaStep("add_required_column","docs","new_field","preflight"),
+    new SchemaStep("add_nullable_column","docs","new_field","safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow competing_adds_reverse).is_err() then
+    panic("reverse same-column addition admitted");
+  fi
+  val drop_after_edit = new SchemaPlan(arr[
+    new SchemaStep("review_type_change","docs","payload","manual"),
+    new SchemaStep("drop_column","docs","payload","destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow drop_after_edit).is_err() then
+    panic("type change followed by same-column drop admitted");
+  fi
+  val independent_columns = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","docs","new_field","safe"),
+    new SchemaStep("drop_column","docs","old_field","destructive")
+  ]);
+  if schema.review_manifest_preview_checked(rt borrow independent_columns).is_err() then
+    panic("unrelated add and drop of distinct stable columns rejected");
+  fi
+  val independent_tables = new SchemaPlan(arr[
+    new SchemaStep("review_drop_table","old_docs","","destructive"),
+    new SchemaStep("review_create_table","new_docs","","manual")
+  ]);
+  if schema.review_manifest_preview_checked(rt borrow independent_tables).is_err() then
+    panic("independent create and drop of different stable tables rejected");
+  fi
+  val combined_non_destructive = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","docs","","manual"),
+    new SchemaStep("review_column_rename","docs","payload","manual"),
+    new SchemaStep("review_type_change","docs","payload","manual"),
+    new SchemaStep("set_not_null","docs","payload","preflight")
+  ]);
+  if schema.review_manifest_preview_checked(rt borrow combined_non_destructive).is_err() then
+    panic("legal rename type and nullability review bundle rejected");
+  fi
+
   stdio.println("Pure Oreslang adversarial schema contracts passed");
   return;
 }
