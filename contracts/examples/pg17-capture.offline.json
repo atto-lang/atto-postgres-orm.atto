@@ -1,0 +1,40 @@
+{
+  "version": "ores.orm.pg17-capture/v1",
+  "cluster_system_identifier": "7311123456789000000",
+  "database_oid": 16385,
+  "server_version_num": 170004,
+  "unmodeled_database_objects": [],
+  "tables": [
+    {
+      "oid": 10010,
+      "schema": "public",
+      "name": "users",
+      "relkind": "r",
+      "rls_enabled": false,
+      "rls_forced": false,
+      "unmodeled_objects": [],
+      "columns": [
+        {
+          "attnum": 1,
+          "name": "id",
+          "pg_type": "uuid",
+          "not_null": true,
+          "default_expr": null,
+          "identity": "",
+          "generated": "",
+          "dropped": false
+        },
+        {
+          "attnum": 2,
+          "name": "display_name",
+          "pg_type": "text",
+          "not_null": false,
+          "default_expr": null,
+          "identity": "",
+          "generated": "",
+          "dropped": false
+        }
+      ]
+    }
+  ]
+}
