@@ -17,7 +17,7 @@ pub define class QueryPlan as
   val Array<string> saved_params;
   pub constructor(string sql, Array<string> params) {
     self.sql = sql;
-    let Array<string> snapshot = arr[];
+    let mut Array<string> snapshot = arr[];
     for (val param of params) {
       snapshot.add(param);
     }
@@ -55,7 +55,7 @@ pub define class TypedQueryPlan as
   val Array<DbValue> saved_values;
   pub constructor(string sql, Array<DbValue> values) {
     self.sql = sql;
-    let Array<DbValue> copy = arr[];
+    let mut Array<DbValue> copy = arr[];
     for (val value of values) {
       copy.add(value);
     }
@@ -92,13 +92,13 @@ pub define class ConstraintSpec as
   val Array<string> saved_reference_columns;
   pub constructor(string kind, Array<string> columns, string reference_table, Array<string> reference_columns) {
     self.kind = kind;
-    let Array<string> local_snapshot = arr[];
+    let mut Array<string> local_snapshot = arr[];
     for (val local_name of columns) {
       local_snapshot.add(local_name);
     }
     self.saved_columns = local_snapshot;
     self.reference_table = reference_table;
-    let Array<string> reference_snapshot = arr[];
+    let mut Array<string> reference_snapshot = arr[];
     for (val reference_name of reference_columns) {
       reference_snapshot.add(reference_name);
     }
@@ -106,14 +106,14 @@ pub define class ConstraintSpec as
   }
   // Never return the internal arrays. Read access returns a fresh local copy.
   pub local_columns(): Array<string> {
-    let Array<string> copy = arr[];
+    let mut Array<string> copy = arr[];
     for (val local_name of self.saved_columns) {
       copy.add(local_name);
     }
     return copy;
   }
   pub referenced_columns(): Array<string> {
-    let Array<string> copy = arr[];
+    let mut Array<string> copy = arr[];
     for (val reference_name of self.saved_reference_columns) {
       copy.add(reference_name);
     }
@@ -179,8 +179,32 @@ define module pg as
   pub fnc constraint_unique(Array<string> columns): ConstraintSpec {
     return new ConstraintSpec("unique", columns, "", arr[]);
   }
+  // Borrowed variants preserve caller ownership while taking an independent
+  // data snapshot. Use these when the caller must keep using its Array.
+  pub fnc constraint_unique_borrowed(borrow Array<string> columns): ConstraintSpec {
+    let mut Array<string> copy = arr[];
+    for (let int index = 0; index < columns.size; index++) {
+      copy.add(columns.get(index));
+    }
+    return new ConstraintSpec("unique", copy, "", arr[]);
+  }
   pub fnc constraint_foreign_key(Array<string> columns, string reference_table, Array<string> reference_columns): ConstraintSpec {
     return new ConstraintSpec("foreign_key", columns, reference_table, reference_columns);
+  }
+  pub fnc constraint_foreign_key_borrowed(
+    borrow Array<string> columns,
+    string reference_table,
+    borrow Array<string> reference_columns
+  ): ConstraintSpec {
+    let mut Array<string> local_copy = arr[];
+    for (let int local_index = 0; local_index < columns.size; local_index++) {
+      local_copy.add(columns.get(local_index));
+    }
+    let mut Array<string> reference_copy = arr[];
+    for (let int reference_index = 0; reference_index < reference_columns.size; reference_index++) {
+      reference_copy.add(reference_columns.get(reference_index));
+    }
+    return new ConstraintSpec("foreign_key", local_copy, reference_table, reference_copy);
   }
   // One direct, deterministic renderer owns typed PK, UNIQUE and FK output.
   // No string surgery on completed SQL and no caller-provided SQL fragments.
@@ -243,7 +267,7 @@ define module pg as
     let string sql_body = sql + ",\n  " + keys + ")";
     let string extra = "";
     // Exact duplicate detection, never substring matching on rendered SQL.
-    let Array<string> seen_clauses = arr[];
+    let mut Array<string> seen_clauses = arr[];
     for (val rule of constraints) {
       val local_columns = rule.local_columns();
       val reference_columns = rule.referenced_columns();
@@ -344,6 +368,17 @@ define module pg as
   pub fnc snapshot_legacy_query(Query query): QueryPlan {
     return new QueryPlan(query.sql, query.params);
   }
+  // Borrow the parameter container directly: this keeps caller ownership and
+  // avoids requiring a projected borrow through a Query field.
+  pub fnc snapshot_query_params_borrowed(
+    string sql, borrow Array<string> params
+  ): QueryPlan {
+    let mut Array<string> copy = arr[];
+    for (let int index = 0; index < params.size; index++) {
+      copy.add(params.get(index));
+    }
+    return new QueryPlan(sql, copy);
+  }
   // Restricted table admission only. Workspace text is NOT tenant authority,
   // and Query.params is still actor-local mutable data, not an owned plan.
   pub fnc find_in_workspace_checked(string table, string workspace, string id): Result<Query, string> {
@@ -357,7 +392,7 @@ define module pg as
   // This is a tag/value admission check, NOT a UUID or JSON parser.
   // A future driver must check again at its own trust boundary and enforce
   // byte caps, PostgreSQL type coercion and binary/text wire encoding.
-  pub fnc admitted_db_value(DbValue value): bool {
+  pub fnc admitted_db_value(borrow DbValue value): bool {
     if value.kind != "uuid" && value.kind != "text" && value.kind != "integer"
       && value.kind != "bigint" && value.kind != "boolean"
       && value.kind != "jsonb" && value.kind != "timestamptz"
@@ -370,7 +405,7 @@ define module pg as
   }
   pub fnc checked_db_value(string kind, string scalar, bool is_null): Result<DbValue, string> {
     val value = new DbValue(kind, scalar, is_null);
-    if !admitted_db_value(value) then return Err("unadmitted PostgreSQL bind value"); fi
+    if !admitted_db_value(rt borrow value) then return Err("unadmitted PostgreSQL bind value"); fi
     return Ok(value);
   }
   // The only public typed plan adapter accepts exactly two admitted,
@@ -384,7 +419,7 @@ define module pg as
     fi
     if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
     for (val value of values) {
-      if !admitted_db_value(value) then
+      if !admitted_db_value(rt borrow value) then
         return Err("unadmitted PostgreSQL bind value");
       fi
       if value.kind != "uuid" || value.is_null then
@@ -394,6 +429,28 @@ define module pg as
     return Ok(new TypedQueryPlan(
       "SELECT * FROM " + ident(table)
         + " WHERE workspace_id = $1::uuid AND id = $2::uuid", values));
+  }
+  pub fnc workspace_typed_values_borrowed_checked(
+    string table, borrow Array<DbValue> values
+  ): Result<TypedQueryPlan, string> {
+    if !admitted_identifier(table) then
+      return Err("unadmitted PostgreSQL query table identifier");
+    fi
+    if values.size != 2 then return Err("workspace query requires exactly two binds"); fi
+    let mut Array<DbValue> copy = arr[];
+    for (let int index = 0; index < values.size; index++) {
+      val value = values.get(index);
+      if !admitted_db_value(rt borrow value) then
+        return Err("unadmitted PostgreSQL bind value");
+      fi
+      if value.kind != "uuid" || value.is_null then
+        return Err("workspace query requires non-null UUID binds");
+      fi
+      copy.add(value);
+    }
+    return Ok(new TypedQueryPlan(
+      "SELECT * FROM " + ident(table)
+        + " WHERE workspace_id = $1::uuid AND id = $2::uuid", copy));
   }
   // Only a vetted fixed SQL template is exported here: caller data stays
   // in the two typed bind slots and never affects SQL text. Workspace data

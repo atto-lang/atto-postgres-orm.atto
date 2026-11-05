@@ -206,8 +206,8 @@ pub routine main(): void {
   ]).is_err() then panic("duplicate foreign referenced columns admitted"); fi
 
   // ConstraintSpec snapshots caller arrays before typed schema planning.
-  let Array<string> unique_names = arr["code"];
-  val unique_snapshot = pg.constraint_unique(unique_names);
+  let mut Array<string> unique_names = arr["code"];
+  val unique_snapshot = pg.constraint_unique_borrowed(rt borrow unique_names);
   unique_names.set(0, "not_declared");
   // A returned accessor array is also a defensive copy, not the internal store.
   val returned_unique_names = unique_snapshot.local_columns();
@@ -220,9 +220,9 @@ pub routine main(): void {
   if snap_unique_ddl.unwrap() != "CREATE TABLE \"docs\" (\n  \"id\" uuid NOT NULL,\n  \"code\" text NOT NULL,\n  PRIMARY KEY (\"id\"),\n  UNIQUE (\"code\")\n);\n" then
     panic("UNIQUE constraint source-array snapshot changed");
   fi
-  let Array<string> local_fk_names = arr["id"];
-  let Array<string> remote_fk_names = arr["id"];
-  val fk_snapshot = pg.constraint_foreign_key(local_fk_names, "workspaces", remote_fk_names);
+  let mut Array<string> local_fk_names = arr["id"];
+  let mut Array<string> remote_fk_names = arr["id"];
+  val fk_snapshot = pg.constraint_foreign_key_borrowed(rt borrow local_fk_names, "workspaces", rt borrow remote_fk_names);
   local_fk_names.set(0, "other_local");
   remote_fk_names.set(0, "other_remote");
   val returned_fk_local = fk_snapshot.local_columns();
@@ -252,10 +252,12 @@ pub routine main(): void {
   fi
   // Prove actual copy-on-admission: changing the legacy array cannot mutate
   // the new plan's private parameter snapshot.
-  val legacy_query = pg.find_in_workspace("runs", "original-workspace", "record-1");
-  val owned_snapshot = pg.snapshot_legacy_query(legacy_query);
-  legacy_query.params.set(0, "tampered-workspace");
-  legacy_query.params.set(1, "tampered-record");
+  let mut Array<string> legacy_params = arr["original-workspace", "record-1"];
+  val owned_snapshot = pg.snapshot_query_params_borrowed(
+    "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid",
+    rt borrow legacy_params);
+  legacy_params.set(0, "tampered-workspace");
+  legacy_params.set(1, "tampered-record");
   if owned_snapshot.param_at(0).unwrap() != "original-workspace" then
     panic("QueryPlan tenant parameter aliased source array");
   fi
@@ -308,7 +310,7 @@ pub routine main(): void {
     pg.checked_db_value("uuid", "original-workspace", false).unwrap(),
     pg.checked_db_value("uuid", "original-record", false).unwrap()
   ];
-  val typed_snapshot = pg.workspace_typed_values_checked("runs", mutable_typed_binds);
+  val typed_snapshot = pg.workspace_typed_values_borrowed_checked("runs", rt borrow mutable_typed_binds);
   if typed_snapshot.is_err() then panic("admitted typed bind snapshot rejected"); fi
   mutable_typed_binds.set(0, pg.checked_db_value("uuid", "modified-workspace", false).unwrap());
   mutable_typed_binds.set(1, pg.checked_db_value("uuid", "modified-record", false).unwrap());
