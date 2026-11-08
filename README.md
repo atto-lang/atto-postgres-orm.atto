@@ -40,3 +40,14 @@ Next: typed DbValue/DbRow and error surfaces, actor-confined prepared statements
 transactions and cancellation, bounded row streams, pool ownership, generated
 row codecs, and live PostgreSQL driver conformance. No unsupported driver is
 presented as implemented.
+
+## Repository ownership and migration (2026-11-08)
+
+This repo is currently `ores-truffle-oreslang/postgres-orm.ores`. The public language name is **AttoLang**; preserve `.ores` compatibility and old repo/package/CLI IDs until a separate compiler-backed and consumer-reviewed change proves replacement.
+
+- **Belongs here:** schema-first AttoLang ORM, typed CRUD, safe migration preview and database contract tests.
+- **Does not belong here:** production database operator privileges and commercial managed DB administration.
+- **Organization model:** [atto-lang](https://github.com/atto-lang) owns portable language libraries, compilers, tools, tests, core/std and examples. [atto-co](https://github.com/atto-co) separately owns managed hosting, tenant/deployment control, identity, billing and SaaS. Existing similarly named `atto-*` repos should be audited for overlap but are not necessarily transfers of this source identity.
+- **Initial proposed move:** this original numeric GitHub repository ID and history into `atto-lang/postgres-orm.ores` retaining the old name. Current migration wave authorizes zero direct moves into `atto-co`. Future product carve-outs require new owner/security approval.
+
+**Safe transfer:** announce in [issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26), follow [private migration draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Record exact source SHA/tree, ID, release tags, PRs, packages, dependencies, branch/ruleset protections, target visibility and rights, Actions/runners, App/webhook permissions, secrets, Pages, rollback authority, source/target admins and independent security review. Never mirror private source without explicit authorization. After an approved GitHub ownership transfer verify unchanged ID/tree/history, restore security policy, change consumers separately and run exact-head tests with **nonzero executed steps**. `steps=[]`/`null` is `NOT_EXECUTED`; host or structural tests cannot certify AttoLang guest execution, database safety or actor parity.
