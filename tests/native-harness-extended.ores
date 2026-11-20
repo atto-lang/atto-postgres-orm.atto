@@ -1,0 +1,48 @@
+// Native Oreslang SQL-planning contracts; no live database is claimed.
+import class TestCase, TestSuite, TestOptions, RunSummary, TestOutcome from '../vendor/oreslang/testing';
+import fnc expect_true, expect_false, run_suite, require_success from '../vendor/oreslang/testing';
+import module pg from '../src/pg';
+
+fnc embedded_quotes_escaped(): TestOutcome {
+  return expect_true(pg.ident("a\"b") == "\"a\"\"b\"", "identifier embedded quote must be doubled");
+}
+fnc valid_boolean_column(): TestOutcome {
+  val result = pg.column("flag", "boolean", false);
+  if result.is_err(); do
+    return expect_true(false, "boolean column rejected");
+  fi
+  return expect_true(result.unwrap() == "\"flag\" boolean NOT NULL", "non-null boolean column spelling");
+}
+fnc unknown_type_rejected(): TestOutcome {
+  return expect_true(pg.column("payload", "varchar", false).is_err(), "non-allowlisted type must fail");
+}
+fnc type_case_rejected(): TestOutcome {
+  return expect_true(pg.column("payload", "UUID", false).is_err(), "mixed-case type must not bypass whitelist");
+}
+fnc table_identifier_escaped(): TestOutcome {
+  val sql = pg.table("audit\"log", arr["\"id\" uuid NOT NULL"], arr[]);
+  return expect_true(sql == "CREATE TABLE \"audit\"\"log\" (\n  \"id\" uuid NOT NULL\n);\n", "DDL table name escaped");
+}
+fnc placeholders_and_param_order(): TestOutcome {
+  val query = pg.find_in_workspace("audit\"log", "ws' OR 1=1--", "id';DROP TABLE x;--");
+  return expect_true(
+    query.sql == "SELECT * FROM \"audit\"\"log\" WHERE workspace_id = $1::uuid AND id = $2::uuid" &&
+    query.params.get(0) == "ws' OR 1=1--" &&
+    query.params.get(1) == "id';DROP TABLE x;--",
+    "untrusted values remain bound and ordered"
+  );
+}
+pub routine main(): void {
+  val TestSuite suite = new TestSuite("postgres-orm/planner", arr[
+    new TestCase("ident/double-quote", embedded_quotes_escaped, false, ""),
+    new TestCase("column/boolean-not-null", valid_boolean_column, false, ""),
+    new TestCase("column/unknown-type", unknown_type_rejected, false, ""),
+    new TestCase("column/type-case", type_case_rejected, false, ""),
+    new TestCase("table/quote-escaping", table_identifier_escaped, false, ""),
+    new TestCase("query/placeholder-param-order", placeholders_and_param_order, false, "")
+  ]);
+  val TestOptions options = new TestOptions("", false, true);
+  val RunSummary summary = run_suite(suite, options);
+  require_success(summary);
+  return;
+}
