@@ -1,0 +1,18 @@
+import module pg from '../src/pg';
+pub routine main(): void {
+  if pg.ident("x\";DROP TABLE runs;--") != "\"x\"\";DROP TABLE runs;--\"" then panic("identifier escape"); fi
+  if !pg.column("x", "text; DROP TABLE runs", false).is_err() then panic("type injection"); fi
+  if pg.column("optional", "jsonb", true).unwrap() != "\"optional\" jsonb" then panic("nullable column"); fi
+  if pg.column("required", "uuid", false).unwrap() != "\"required\" uuid NOT NULL" then panic("required column"); fi
+  val query = pg.find_in_workspace("runs", "hostile' OR true--", "id");
+  if query.params.get(0) != "hostile' OR true--" then panic("bound params"); fi
+  if query.sql != "SELECT * FROM \"runs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then panic("query SQL"); fi
+  // Three additional SQL-plan contracts: escaping, type admission, value binding.
+  if pg.ident("a\"b") != "\"a\"\"b\"" then panic("embedded quote not escaped"); fi
+  if !pg.column("name", "uuid; SELECT 1", false).is_err() then panic("type-token injection"); fi
+  if query.params.get(1) != "id" then panic("identifier value must remain bound"); fi
+  if !pg.column("unsafe", "integer CHECK (1=1)", false).is_err() then panic("type expression injection"); fi
+  if pg.column("nullable2", "text", true).unwrap() != "\"nullable2\" text" then panic("nullable text type"); fi
+  stdio.println("Postgres SQL planning contracts passed");
+  return;
+}

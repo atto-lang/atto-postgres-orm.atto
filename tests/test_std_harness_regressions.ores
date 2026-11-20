@@ -1,0 +1,58 @@
+import class TestCase, TestSuite, TestOptions, TestOutcome, RunSummary from "ores.std/testing";
+import fnc expect_true, expect_false, expect_equal_int, expect_equal_string, expect_near_float, run_suite, require_success, fail from "ores.std/testing";
+import module pg from "../src/pg";
+fnc quoted_identifier_escapes_quotes(): TestOutcome {
+  return expect_equal_string(pg.ident("a\"b"), "\"a\"\"b\"",
+    "identifier quotes must be doubled to prevent SQL syntax injection");
+}
+fnc unsupported_type_is_rejected(): TestOutcome {
+  return expect_true(pg.column("status", "varchar", false).is_err(),
+    "SQL type spellings must be allowlisted");
+}
+fnc query_values_remain_separate_from_sql(): TestOutcome {
+  val query = pg.find_in_workspace("orders", "tenant-1", "row-2");
+  return expect_true(query.sql.contains_literal("$1::uuid") &&
+    query.sql.contains_literal("$2::uuid") && !query.sql.contains_literal("tenant-1") &&
+    query.params.size == 2 && query.params.get(0) == "tenant-1" &&
+    query.params.get(1) == "row-2",
+    "workspace and ID must remain separately bound SQL parameters");
+}
+fnc not_null_column_is_explicit(): TestOutcome {
+  val result = pg.column("id", "uuid", false);
+  if result.is_err(); then return fail("supported uuid column rejected"); fi
+  return expect_equal_string(result.unwrap(), "\"id\" uuid NOT NULL",
+    "nonnullable column must emit NOT NULL");
+}
+
+fnc nullable_column_omits_not_null(): TestOutcome {
+  val result = pg.column("note", "text", true);
+  if result.is_err(); then return fail("supported nullable text column rejected"); fi
+  return expect_equal_string(result.unwrap(), "\"note\" text",
+    "nullable column must not include NOT NULL constraint");
+}
+
+fnc dotted_identifier_is_always_quoted(): TestOutcome {
+  return expect_equal_string(pg.ident("account.events"), "\"account.events\"",
+    "dots must remain within one quoted SQL identifier");
+}
+
+fnc injected_sql_type_token_is_rejected(): TestOutcome {
+  return expect_true(pg.column("id", "text); DROP TABLE logs; --", true).is_err(),
+    "type-token injection must not enter generated DDL");
+}
+
+pub routine main(): void {
+  val TestSuite suite = new TestSuite("postgres-orm", arr[
+    new TestCase("quoted_identifier_escapes_quotes", quoted_identifier_escapes_quotes, false, ""),
+    new TestCase("unsupported_type_is_rejected", unsupported_type_is_rejected, false, ""),
+    new TestCase("query_values_remain_separate_from_sql", query_values_remain_separate_from_sql, false, ""),
+    new TestCase("not_null_column_is_explicit", not_null_column_is_explicit, false, ""),
+    new TestCase("nullable_column_omits_not_null", nullable_column_omits_not_null, false, ""),
+    new TestCase("dotted_identifier_is_always_quoted", dotted_identifier_is_always_quoted, false, ""),
+    new TestCase("injected_sql_type_token_is_rejected", injected_sql_type_token_is_rejected, false, "")
+  ]);
+  val TestOptions options = new TestOptions("", false, true);
+  val RunSummary summary = run_suite(rt borrow suite, rt borrow options);
+  require_success(rt borrow summary);
+  return;
+}
