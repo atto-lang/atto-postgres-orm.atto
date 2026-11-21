@@ -121,6 +121,34 @@ pub define class ConstraintSpec as
   }
 end
 
+// Actor/connection ownership snapshot for a future live PostgreSQL adapter.
+// The driver must keep the authoritative current instance actor-local.
+// Public construction never grants execution authority; all operations must
+// re-check against the driver-owned current state.
+pub define class DbConnectionState as
+  pub val string connection_id;
+  pub val string owner_actor_id;
+  pub val int actor_generation;
+  pub val int lease_generation;
+  pub val string tenant_role;
+  pub val string phase;
+  pub constructor(
+    string connection_id,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation,
+    string tenant_role,
+    string phase
+  ) {
+    self.connection_id = connection_id;
+    self.owner_actor_id = owner_actor_id;
+    self.actor_generation = actor_generation;
+    self.lease_generation = lease_generation;
+    self.tenant_role = tenant_role;
+    self.phase = phase;
+  }
+end
+
 define module pg as
   // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
   // This is NOT full UTF-8 byte-length validation; legacy SQL methods
@@ -465,4 +493,179 @@ define module pg as
     ];
     return workspace_typed_values_checked(table, binds);
   }
+  // Opaque actor identity may contain non-SQL characters, but it must be
+  // nonempty and free from control/NUL surfaces.
+  pub fnc admitted_actor_identity(string actor_id): bool {
+    return !invalid_identifier_surface(actor_id);
+  }
+  pub fnc admitted_connection_state(borrow DbConnectionState state): bool {
+    if !admitted_identifier(state.connection_id) then return false; fi
+    if !admitted_actor_identity(state.owner_actor_id) then return false; fi
+    if state.actor_generation < 1 || state.lease_generation < 1 then return false; fi
+    if !admitted_identifier(state.tenant_role) then return false; fi
+    if state.phase != "idle"
+      && state.phase != "active"
+      && state.phase != "rollback_required"
+      && state.phase != "committed"
+      && state.phase != "rolled_back"
+      && state.phase != "released" then
+      return false;
+    fi
+    return true;
+  }
+  // This checks the exact actor incarnation and exact pool lease generation.
+  // It is only meaningful when state is the driver's authoritative current
+  // actor-local state, not a caller-provided snapshot.
+  pub fnc same_connection_authority(
+    borrow DbConnectionState state,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): bool {
+    if !admitted_connection_state(rt borrow state) then return false; fi
+    if state.phase == "released" then return false; fi
+    return state.owner_actor_id == owner_actor_id
+      && state.actor_generation == actor_generation
+      && state.lease_generation == lease_generation;
+  }
+  pub fnc same_lease_identity(
+    borrow DbConnectionState current,
+    borrow DbConnectionState presented
+  ): bool {
+    if !admitted_connection_state(rt borrow current)
+      || !admitted_connection_state(rt borrow presented) then
+      return false;
+    fi
+    return current.connection_id == presented.connection_id
+      && current.owner_actor_id == presented.owner_actor_id
+      && current.actor_generation == presented.actor_generation
+      && current.lease_generation == presented.lease_generation;
+  }
+  pub fnc acquire_connection_checked(
+    string connection_id,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation,
+    string tenant_role
+  ): Result<DbConnectionState, string> {
+    val state = new DbConnectionState(
+      connection_id, owner_actor_id, actor_generation, lease_generation,
+      tenant_role, "idle");
+    if !admitted_connection_state(rt borrow state) then
+      return Err("unadmitted PostgreSQL connection lease");
+    fi
+    return Ok(state);
+  }
+  pub fnc begin_transaction_checked(
+    borrow DbConnectionState current,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): Result<DbConnectionState, string> {
+    if !same_connection_authority(
+      rt borrow current, owner_actor_id, actor_generation, lease_generation
+    ) then
+      return Err("stale or foreign PostgreSQL connection lease");
+    fi
+    if current.phase != "idle" then return Err("PostgreSQL transaction is not idle"); fi
+    return Ok(new DbConnectionState(
+      current.connection_id, current.owner_actor_id, current.actor_generation,
+      current.lease_generation, current.tenant_role, "active"));
+  }
+  // Call only after the transport has received a successful COMMIT completion.
+  pub fnc acknowledge_commit_checked(
+    borrow DbConnectionState current,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): Result<DbConnectionState, string> {
+    if !same_connection_authority(
+      rt borrow current, owner_actor_id, actor_generation, lease_generation
+    ) then
+      return Err("stale or foreign PostgreSQL connection lease");
+    fi
+    if current.phase != "active" then return Err("PostgreSQL transaction is not active"); fi
+    return Ok(new DbConnectionState(
+      current.connection_id, current.owner_actor_id, current.actor_generation,
+      current.lease_generation, current.tenant_role, "committed"));
+  }
+  // Actor abort never makes an active connection reusable. It first enters a
+  // rollback-required quarantine until the database confirms rollback.
+  pub fnc mark_actor_abort_checked(
+    borrow DbConnectionState current,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): Result<DbConnectionState, string> {
+    if !same_connection_authority(
+      rt borrow current, owner_actor_id, actor_generation, lease_generation
+    ) then
+      return Err("stale or foreign PostgreSQL connection lease");
+    fi
+    if current.phase != "active" then return Err("actor abort requires an active PostgreSQL transaction"); fi
+    return Ok(new DbConnectionState(
+      current.connection_id, current.owner_actor_id, current.actor_generation,
+      current.lease_generation, current.tenant_role, "rollback_required"));
+  }
+  // Call only after ROLLBACK has completed and the driver has observed a clean
+  // idle protocol state. Unknown outcomes must remain quarantined instead.
+  pub fnc acknowledge_abort_rollback_checked(
+    borrow DbConnectionState current,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): Result<DbConnectionState, string> {
+    if !same_connection_authority(
+      rt borrow current, owner_actor_id, actor_generation, lease_generation
+    ) then
+      return Err("stale or foreign PostgreSQL connection lease");
+    fi
+    if current.phase != "rollback_required" then
+      return Err("PostgreSQL connection does not require abort rollback");
+    fi
+    return Ok(new DbConnectionState(
+      current.connection_id, current.owner_actor_id, current.actor_generation,
+      current.lease_generation, current.tenant_role, "rolled_back"));
+  }
+  // A pool may release only a clean non-active state. The live adapter must
+  // additionally reset role/session settings or destroy the connection.
+  pub fnc release_connection_checked(
+    borrow DbConnectionState current,
+    string owner_actor_id,
+    int actor_generation,
+    int lease_generation
+  ): Result<DbConnectionState, string> {
+    if !same_connection_authority(
+      rt borrow current, owner_actor_id, actor_generation, lease_generation
+    ) then
+      return Err("stale or foreign PostgreSQL connection lease");
+    fi
+    if current.phase == "active" || current.phase == "rollback_required" then
+      return Err("PostgreSQL connection cannot be released before transaction cleanup");
+    fi
+    return Ok(new DbConnectionState(
+      current.connection_id, current.owner_actor_id, current.actor_generation,
+      current.lease_generation, current.tenant_role, "released"));
+  }
+  // Pool reassignment is monotone. Reusing the same lease generation would
+  // let a stale actor ticket regain authority after a connection is recycled.
+  pub fnc reassign_released_connection_checked(
+    borrow DbConnectionState released,
+    string new_owner_actor_id,
+    int new_actor_generation,
+    int new_lease_generation,
+    string new_tenant_role
+  ): Result<DbConnectionState, string> {
+    if !admitted_connection_state(rt borrow released) then
+      return Err("unadmitted PostgreSQL released connection state");
+    fi
+    if released.phase != "released" then return Err("PostgreSQL connection is not released"); fi
+    if new_lease_generation <= released.lease_generation then
+      return Err("PostgreSQL lease generation must increase");
+    fi
+    return acquire_connection_checked(
+      released.connection_id, new_owner_actor_id, new_actor_generation,
+      new_lease_generation, new_tenant_role);
+  }
+
 end
