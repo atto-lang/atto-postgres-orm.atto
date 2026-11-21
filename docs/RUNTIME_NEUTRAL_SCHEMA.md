@@ -350,3 +350,41 @@ discover and execute at least 98 host methods in five suites; the actual
 runner must execute steps before any PASS claim. Native Oreslang, TypeSpec
 emission, PostgreSQL read-only extraction, DPM replay, actor/RLS lifecycle,
 locking, rollback and backend parity all remain separate release gates.
+
+
+## Read-only PostgreSQL 17 catalog reader (stage 10)
+
+The optional host-only `scripts/orm_pg_catalog_reader_host.py` reads a
+PostgreSQL 17 database under one explicitly started `REPEATABLE READ READ ONLY`
+transaction and always rolls back. Its static SELECT queries consult
+`pg_class`, `pg_namespace`, `pg_attribute`, `pg_attrdef`,
+`pg_constraint`, `pg_index`, `pg_trigger`, `pg_policy`,
+`pg_rewrite`, `pg_inherits`, publication metadata, and global feature
+counters. The reader refuses to guess a cluster identity: PostgreSQL must
+permit the **dedicated read-only capture role** to call
+`pg_catalog.pg_control_system()`; an explicit DBA-reviewed narrow
+EXECUTE grant is needed if it is restricted. Do not elevate the role to
+superuser or broadly grant pg_monitor merely to make a test pass.
+
+Use `capture_from_dsn(dsn)` from a controlled host with optional psycopg3.
+The DSN is never included in a log or artifact. There is no CLI apply mode,
+no SQL interpolation, no writes and no migration authority. A rejected
+identity/counter or missing read privilege must FAIL, not be replaced by an
+operator-supplied string. Never use production DB credentials in CI.
+
+The output is an **untrusted captured catalog**, not a reviewed stable-ID
+mapping or a complete schema attestation. Pass it to the separate
+`project_capture(capture, reviewed_ledger)` API and require all reported
+unmodeled objects to be absent; the ledger must be scoped to the actual
+cluster and DB OID. The v1 catalog deliberately cannot represent many
+real-world PostgreSQL constructs, including indexes, PK/FK constraints,
+defaults, RLS policies, partitions, views and user-defined functions;
+when seen they block promotion rather than being silently lost.
+
+14 fake-connection test methods verify that the reader uses fixed SQL,
+requires read-only snapshot isolation, denies unverifiable cluster IDs,
+retains unsupported features and never commits. These are NOT real
+PostgreSQL executions. The host CI count is now at least 112 methods
+across six suites. A real PostgreSQL 17 fixture/container, DBA-reviewed
+capture privileges, compiled native Oreslang driver, lifecycle/RLS,
+DPM locking/replay, TypeSpec and five/six-backend results remain unverified.
