@@ -1,0 +1,50 @@
+name: PostgreSQL 17 SQL golden integration (NOT Oreslang guest)
+on:
+  pull_request:
+    paths:
+      - 'src/pg.ores'
+      - 'tests/plans.ores'
+      - 'tests/pg17-ddl-contract.bash'
+      - 'tests/verify-pg17-ddl-host.bash'
+      - '.github/workflows/pg17-ddl-integration.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  rollback-only-ddl-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: orm_contract
+          POSTGRES_PASSWORD: local_ci_test_only
+          POSTGRES_DB: orm_contract
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U orm_contract -d orm_contract"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Install PostgreSQL client only
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client
+          psql --version
+      - name: Execute SQL-only constraint contract and mandatory rollback
+        shell: bash
+        env:
+          PG_TEST_DISPOSABLE: I_ACKNOWLEDGE_DISPOSABLE_DATABASE
+          PG_TEST_DSN: postgresql://orm_contract:local_ci_test_only@localhost:5432/orm_contract
+        run: |
+          set -euo pipefail
+          bash -n tests/pg17-ddl-contract.bash
+          bash tests/pg17-ddl-contract.bash
+          printf '%s\n' 'SQL_ONLY_DB_GATE_COMPLETE: Does not compile Oreslang or verify RLS/driver/backend parity'

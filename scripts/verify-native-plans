@@ -1,0 +1,120 @@
+#!/usr/bin/env bash
+# Exact-head native PostgreSQL planner guest verification. No source transfer.
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+compiler="${ORESLANG_SOURCE_DIR:-$root/../oreslang-source.java}"
+java_bin="${ORES_JAVA:-java}"
+expected_orm="${EXPECTED_ORM_SHA:-}"
+evidence="${EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/ores-pg-guest.XXXXXXXX")}"
+# Never reuse an evidence directory: stale files must never look like new proof.
+if [[ -e "$evidence" ]]; then
+  [[ -d "$evidence" && ! -L "$evidence" ]] || { echo 'Evidence path must be an ordinary directory' >&2; exit 1; }
+  [[ -z "$(find "$evidence" -mindepth 1 -maxdepth 1 -print -quit)" ]] || { echo 'Evidence directory must be empty (no stale receipts)' >&2; exit 1; }
+else
+  mkdir -p "$evidence"
+fi
+evidence="$(cd "$evidence" && pwd -P)"
+case "$evidence/" in "$root/"*) printf "Evidence must be stored outside the ORM tree\n" >&2; exit 1;; esac
+printf 'Native guest evidence directory: %s\n' "$evidence"
+# A killed process or unexpected shell failure must remain NOT_VERIFIED.
+printf '%s\n' 'NOT_VERIFIED: native guest verification incomplete' > "$evidence/RESULT.txt"
+
+fail() { printf 'FAIL: %s\n' "$*" >&2; printf 'NOT_VERIFIED: %s\n' "$*" > "$evidence/RESULT.txt"; exit 1; }
+require() { command -v "$1" >/dev/null 2>&1 || fail "required command missing: $1"; }
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1";
+  else shasum -a 256 "$1"; fi
+}
+require git
+require mvn
+require "$java_bin"
+if ! command -v sha256sum >/dev/null 2>&1; then require shasum; fi
+[[ "$expected_orm" =~ ^[0-9a-f]{40}$ ]] || fail 'EXPECTED_ORM_SHA must be an explicit 40-character lowercase commit SHA'
+[[ -d "$root/.git" || -f "$root/.git" ]] || fail 'ORM checkout is not a Git working tree'
+actual_orm="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || fail 'cannot read ORM git HEAD'
+[[ "$actual_orm" == "$expected_orm" ]] || fail "ORM head mismatch: expected $expected_orm; got $actual_orm"
+[[ -z "$(git -C "$root" status --porcelain --untracked-files=no)" ]] || fail 'ORM checkout has tracked modifications'
+# Do not respect .gitignore: ignored guest files can still affect execution.
+[[ -z "$(git -C "$root" ls-files --others -- src tests scripts)" ]] || fail 'ORM checkout has untracked or ignored guest source or scripts'
+[[ -f "$root/SOURCE_REF" ]] || fail 'SOURCE_REF is missing'
+pinned="$(tr -d '\r\n' < "$root/SOURCE_REF")"
+[[ "$pinned" =~ ^[0-9a-f]{40}$ ]] || fail 'invalid compiler SOURCE_REF'
+[[ -d "$compiler" ]] || fail 'authorized private compiler checkout is missing'
+compiler="$(cd "$compiler" && pwd -P)"
+actual_compiler="$(git -C "$compiler" rev-parse HEAD 2>/dev/null)" || fail 'cannot inspect compiler git HEAD'
+[[ "$actual_compiler" == "$pinned" ]] || fail "compiler head mismatch: expected $pinned; got $actual_compiler"
+[[ -z "$(git -C "$compiler" status --porcelain --untracked-files=no)" ]] || fail 'compiler checkout has tracked modifications'
+# Maven compiles from local source roots regardless of gitignore patterns.
+# Refuse untracked/ignored build inputs, while permitting generated target/ files.
+[[ -z "$(git -C "$compiler" ls-files --others -- src pom.xml .mvn)" ]] || fail 'compiler checkout has untracked or ignored build inputs'
+case "$evidence/" in "$compiler/"*) fail 'Evidence must be stored outside the compiler checkout';; esac
+version="$($java_bin -version 2>&1 | head -n 1)" || fail 'cannot read Java version'
+[[ "$version" =~ \"25([.\"]|$) ]] || fail "JDK 25 required; observed $version"
+# ORES_JAVA controls the guest launcher, but Maven may use JAVA_HOME instead.
+# Fail if the compiler build itself would run on an unpinned/older Java.
+mvn -version > "$evidence/maven-version.stdout" 2> "$evidence/maven-version.stderr" || fail 'cannot inspect Maven runtime'
+grep -Eq '^Java version: 25([.,[:space:]]|$)' "$evidence/maven-version.stdout" || fail 'Maven must run on JDK 25; align JAVA_HOME with ORES_JAVA'
+
+printf 'orm_head=%s\ncompiler_head=%s\njava_version=%s\n' "$actual_orm" "$actual_compiler" "$version" > "$evidence/provenance.txt"
+printf 'java_home=%s\n' "${JAVA_HOME:-unset}" >> "$evidence/provenance.txt"
+git -C "$root" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
+git -C "$compiler" rev-parse 'HEAD^{tree}' >> "$evidence/provenance.txt"
+printf '%s\n' 'mvn -q -DskipTests clean package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt' >> "$evidence/provenance.txt"
+if ! (cd "$compiler" && mvn -q -DskipTests clean package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt) > "$evidence/compiler-build.stdout" 2> "$evidence/compiler-build.stderr"; then
+  fail 'pinned compiler clean build failed; see compiler-build.stderr'
+fi
+[[ -f "$compiler/target/classpath.txt" ]] || fail 'Maven classpath output missing'
+[[ -f "$compiler/target/classes/dev/oreslang/launcher/OresMain.class" ]] || fail 'OresMain.class missing after clean build'
+sha256_file "$compiler/target/classes/dev/oreslang/launcher/OresMain.class" > "$evidence/launcher.sha256"
+sha256_file "$compiler/target/classpath.txt" > "$evidence/classpath.sha256"
+printf 'path\tsha256\n' > "$evidence/runtime-dependencies.tsv"
+IFS=':' read -r -a dependencies < "$compiler/target/classpath.txt"
+for dependency in "${dependencies[@]}"; do
+  [[ -f "$dependency" ]] || fail "missing Maven runtime dependency: $dependency"
+  printf '%s\t' "$dependency" >> "$evidence/runtime-dependencies.tsv"
+  sha256_file "$dependency" | awk '{print $1}' >> "$evidence/runtime-dependencies.tsv"
+done
+for file in SOURCE_REF scripts/ores scripts/verify-native-plans src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
+  sha256_file "$root/$file" >> "$evidence/orm-sources.sha256"
+done
+(cd "$compiler" && find target/classes -type f | LC_ALL=C sort | while IFS= read -r file; do
+  sha256_file "$file"
+done) > "$evidence/compiler-classes.sha256"
+sha256_file "$evidence/compiler-classes.sha256" > "$evidence/compiler-classes-manifest.sha256"
+
+printf 'case\texit\tresult\n' > "$evidence/outcomes.tsv"
+run_guest() {
+  local label="$1" source="$2" expected="$3" outcome=FAIL rc
+  [[ -f "$root/$source" ]] || fail "guest test file missing: $source"
+  printf 'ORES_JAVA=%q ORESLANG_SOURCE_DIR=%q %q %q\n' "$java_bin" "$compiler" "$root/scripts/ores" "$source" >> "$evidence/commands.txt"
+  set +e
+  (cd "$root" && ORES_JAVA="$java_bin" ORESLANG_SOURCE_DIR="$compiler" "$root/scripts/ores" "$source") > "$evidence/$label.stdout" 2> "$evidence/$label.stderr"
+  rc=$?
+  set -e
+  if [[ "$expected" == positive ]]; then
+    printf 'Postgres SQL planning contracts passed\n' > "$evidence/expected-positive.stdout"
+    if [[ "$rc" -eq 0 ]] && cmp -s "$evidence/expected-positive.stdout" "$evidence/$label.stdout"; then outcome=PASS; fi
+  else
+    printf "PG_NEGATIVE_%s_STARTED\n" "$(printf "%s" "$label" | tr "[:lower:]-" "[:upper:]_")" > "$evidence/$label.expected-stdout"
+    # A launcher failure is never a valid negative guest result.
+    if [[ "$rc" -ne 0 && "$rc" -ne 69 && "$rc" -ne 126 && "$rc" -ne 127 ]] \
+       && grep -Fq -- "$expected" "$evidence/$label.stderr" \
+       && cmp -s "$evidence/$label.expected-stdout" "$evidence/$label.stdout"; then outcome=PASS; fi
+  fi
+  printf '%s\t%s\t%s\n' "$label" "$rc" "$outcome" >> "$evidence/outcomes.tsv"
+  [[ "$outcome" == PASS ]] || fail "guest oracle failed for $label (exit $rc)"
+}
+run_guest positive tests/plans.ores positive
+run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'
+run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'
+run_guest control-identifier tests/negative/control_identifier.ores 'invalid PostgreSQL identifier surface'
+# A successfully exited script is not proof unless every required fixture ran
+# in order, exactly once, with an explicit PASS recorded for each one.
+required_cases="$(printf '%s\n' positive empty-identifier empty-table control-identifier)"
+actual_cases="$(tail -n +2 "$evidence/outcomes.tsv" | cut -f1)"
+[[ "$actual_cases" == "$required_cases" ]] || fail 'missing, reordered or unexpected native guest cases'
+[[ "$(wc -l < "$evidence/outcomes.tsv")" -eq 5 ]] || fail 'native guest receipt row count mismatch'
+[[ "$(tail -n +2 "$evidence/outcomes.tsv" | cut -f3 | sort -u)" == PASS ]] || fail 'native guest receipt contains non-PASS result'
+printf 'VERIFIED: four native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
+cat "$evidence/RESULT.txt"
