@@ -1,0 +1,211 @@
+import module pg from '../src/pg';
+
+define actor PgWireProbe as
+  state {
+    phase: String = "idle";
+    requests: int = 0;
+  }
+
+  suspends receive(ActorMail<String> mail): void {
+    if mail.value != "run" then
+      self.end();
+      return;
+    fi
+
+    self.handle_state(critical[write] |state| -> {
+      state.phase = "connecting";
+    });
+
+    val NioTcpConnection socket =
+        await network.connect_async("127.0.0.1", 5432);
+
+    val startup = pg.wire_startup_message("postgres", "postgres");
+    if startup.is_err() then panic("native PostgreSQL startup frame rejected"); fi
+    val startup_bytes = startup.unwrap();
+    val int startup_size = startup_bytes.size;
+    val int startup_sent = await socket.write_bytes_async(startup_bytes);
+    if startup_sent != startup_size then panic("native PostgreSQL startup short write"); fi
+
+    let bool startup_ready = false;
+    for (let int startup_frame_count = 0;
+         startup_frame_count < 64 && !startup_ready;
+         startup_frame_count = startup_frame_count + 1) {
+      let mut List<int> frame_bytes = [];
+      while frame_bytes.size < 5 {
+        val List<int> chunk = await socket.read_bytes_async(5 - frame_bytes.size);
+        if chunk.size == 0 then panic("native PostgreSQL EOF in startup header"); fi
+        for (val byte_value of chunk) { frame_bytes.add(byte_value); }
+      }
+      val frame_length = pg.wire_read_i32_be(rt borrow frame_bytes, 1);
+      if frame_length.is_err()
+        || frame_length.unwrap() < 4
+        || frame_length.unwrap() > 16777216 then
+        panic("native PostgreSQL invalid startup backend length");
+      fi
+      val int total_size = frame_length.unwrap() + 1;
+      while frame_bytes.size < total_size {
+        val List<int> chunk =
+            await socket.read_bytes_async(total_size - frame_bytes.size);
+        if chunk.size == 0 then panic("native PostgreSQL EOF in startup payload"); fi
+        for (val byte_value of chunk) { frame_bytes.add(byte_value); }
+      }
+      val parsed = pg.wire_backend_frame_checked(frame_bytes);
+      if parsed.is_err() then panic("native PostgreSQL startup backend frame rejected"); fi
+      val frame = parsed.unwrap();
+      if frame.type_tag == 82 then
+        val auth = pg.wire_authentication_code(frame);
+        if auth.is_err() || auth.unwrap() != 0 then
+          panic("native PostgreSQL fixture requires disposable trust AuthenticationOk");
+        fi
+      fi
+      if frame.type_tag == 69 then
+        val failure = pg.wire_error_response_checked(frame);
+        if failure.is_err() then panic("native PostgreSQL malformed startup ErrorResponse"); fi
+        panic("native PostgreSQL startup ErrorResponse " + failure.unwrap().sqlstate);
+      fi
+      if frame.type_tag == 90 then
+        val status = pg.wire_ready_status(frame);
+        if status.is_err() || status.unwrap() != "I" then
+          panic("native PostgreSQL startup did not reach idle ReadyForQuery");
+        fi
+        startup_ready = true;
+      fi
+    }
+    if !startup_ready then panic("native PostgreSQL startup frame budget exhausted"); fi
+
+    self.handle_state(critical[write] |state| -> {
+      state.phase = "querying";
+    });
+
+    val plan = pg.find_in_workspace_typed_plan_checked(
+        "runs",
+        "00000000-0000-0000-0000-000000000001",
+        "00000000-0000-0000-0000-000000000002");
+    if plan.is_err() then panic("native PostgreSQL checked query plan rejected"); fi
+
+    val parse_frame = pg.wire_parse_unnamed_message(plan.unwrap());
+    val bind_frame = pg.wire_bind_unnamed_message(plan.unwrap());
+    val execute_frame = pg.wire_execute_unnamed_message(0);
+    if parse_frame.is_err() || bind_frame.is_err() || execute_frame.is_err() then
+      panic("native PostgreSQL extended-query frame rejected");
+    fi
+
+    val parse_bytes = parse_frame.unwrap();
+    val int parse_size = parse_bytes.size;
+    if await socket.write_bytes_async(parse_bytes) != parse_size then
+      panic("native PostgreSQL Parse short write");
+    fi
+
+    val bind_bytes = bind_frame.unwrap();
+    val int bind_size = bind_bytes.size;
+    if await socket.write_bytes_async(bind_bytes) != bind_size then
+      panic("native PostgreSQL Bind short write");
+    fi
+
+    val describe_bytes = pg.wire_describe_unnamed_portal_message();
+    val int describe_size = describe_bytes.size;
+    if await socket.write_bytes_async(describe_bytes) != describe_size then
+      panic("native PostgreSQL Describe short write");
+    fi
+
+    val execute_bytes = execute_frame.unwrap();
+    val int execute_size = execute_bytes.size;
+    if await socket.write_bytes_async(execute_bytes) != execute_size then
+      panic("native PostgreSQL Execute short write");
+    fi
+
+    val sync_bytes = pg.wire_sync_message();
+    val int sync_size = sync_bytes.size;
+    if await socket.write_bytes_async(sync_bytes) != sync_size then
+      panic("native PostgreSQL Sync short write");
+    fi
+
+    let bool query_ready = false;
+    let bool saw_expected_row = false;
+    for (let int query_frame_count = 0;
+         query_frame_count < 128 && !query_ready;
+         query_frame_count = query_frame_count + 1) {
+      let mut List<int> frame_bytes = [];
+      while frame_bytes.size < 5 {
+        val List<int> chunk = await socket.read_bytes_async(5 - frame_bytes.size);
+        if chunk.size == 0 then panic("native PostgreSQL EOF in query header"); fi
+        for (val byte_value of chunk) { frame_bytes.add(byte_value); }
+      }
+      val frame_length = pg.wire_read_i32_be(rt borrow frame_bytes, 1);
+      if frame_length.is_err()
+        || frame_length.unwrap() < 4
+        || frame_length.unwrap() > 16777216 then
+        panic("native PostgreSQL invalid query backend length");
+      fi
+      val int total_size = frame_length.unwrap() + 1;
+      while frame_bytes.size < total_size {
+        val List<int> chunk =
+            await socket.read_bytes_async(total_size - frame_bytes.size);
+        if chunk.size == 0 then panic("native PostgreSQL EOF in query payload"); fi
+        for (val byte_value of chunk) { frame_bytes.add(byte_value); }
+      }
+
+      val parsed = pg.wire_backend_frame_checked(frame_bytes);
+      if parsed.is_err() then panic("native PostgreSQL query backend frame rejected"); fi
+      val frame = parsed.unwrap();
+
+      if frame.type_tag == 69 then
+        val failure = pg.wire_error_response_checked(frame);
+        if failure.is_err() then panic("native PostgreSQL malformed query ErrorResponse"); fi
+        panic("native PostgreSQL query ErrorResponse " + failure.unwrap().sqlstate);
+      fi
+
+      if frame.type_tag == 68 then
+        val row = pg.wire_data_row_checked(frame);
+        if row.is_err() || row.unwrap().column_count() < 2 then
+          panic("native PostgreSQL malformed workspace DataRow");
+        fi
+        val workspace = row.unwrap().value_at(0);
+        val record = row.unwrap().value_at(1);
+        if workspace.is_err() || record.is_err() then
+          panic("native PostgreSQL workspace row unexpectedly NULL");
+        fi
+        if workspace.unwrap() == "00000000-0000-0000-0000-000000000001"
+          && record.unwrap() == "00000000-0000-0000-0000-000000000002" then
+          saw_expected_row = true;
+        fi
+      fi
+
+      if frame.type_tag == 90 then
+        val status = pg.wire_ready_status(frame);
+        if status.is_err() || status.unwrap() != "I" then
+          panic("native PostgreSQL query did not recover to idle ReadyForQuery");
+        fi
+        query_ready = true;
+      fi
+    }
+
+    if !query_ready || !saw_expected_row then
+      panic("native PostgreSQL actor did not observe expected workspace row");
+    fi
+
+    await socket.close_async();
+
+    self.handle_state(critical[write] |state| -> {
+      state.phase = "complete";
+      state.requests = state.requests + 1;
+    });
+    let bool state_ok = false;
+    self.handle_state(critical[read] |state| -> {
+      state_ok = state.phase == "complete" && state.requests == 1;
+    });
+    if !state_ok then panic("native PostgreSQL actor sealed state mismatch"); fi
+
+    stdio.stdout.write("PG_NATIVE_ACTOR_WIRE_PASS");
+    self.end();
+    return;
+  }
+end
+
+pub async routine main(): void {
+  val worker = spawn PgWireProbe();
+  await worker.get_ready();
+  worker.send("run");
+  await worker.get_done();
+  return;
+}

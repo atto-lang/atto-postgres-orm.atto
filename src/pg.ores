@@ -149,6 +149,65 @@ pub define class DbConnectionState as
   }
 end
 
+// One fully framed PostgreSQL backend message. Construction snapshots bytes;
+// parsing functions still revalidate message-specific structure.
+pub define class PgBackendFrame as
+  pub val int type_tag;
+  val List<int> saved_payload;
+  pub constructor(int type_tag, List<int> payload) {
+    self.type_tag = type_tag;
+    let mut List<int> copy = [];
+    for (val byte_value of payload) { copy.add(byte_value); }
+    self.saved_payload = copy;
+  }
+  pub payload(): List<int> {
+    let mut List<int> copy = [];
+    for (val byte_value of self.saved_payload) { copy.add(byte_value); }
+    return copy;
+  }
+end
+
+pub define class PgBackendError as
+  pub val string sqlstate;
+  pub val string message;
+  pub constructor(string sqlstate, string message) {
+    self.sqlstate = sqlstate;
+    self.message = message;
+  }
+end
+
+pub define class PgBackendKeyData as
+  pub val int process_id;
+  pub val int secret_key;
+  pub constructor(int process_id, int secret_key) {
+    self.process_id = process_id;
+    self.secret_key = secret_key;
+  }
+end
+
+pub define class PgTextRow as
+  val List<string> saved_values;
+  val List<bool> saved_nulls;
+  pub constructor(List<string> values, List<bool> nulls) {
+    let mut List<string> value_copy = [];
+    for (val value of values) { value_copy.add(value); }
+    let mut List<bool> null_copy = [];
+    for (val is_null of nulls) { null_copy.add(is_null); }
+    self.saved_values = value_copy;
+    self.saved_nulls = null_copy;
+  }
+  pub column_count(): int { return self.saved_values.size; }
+  pub is_null(int index): bool {
+    if index < 0 || index >= self.saved_nulls.size then panic("PostgreSQL row index out of bounds"); fi
+    return self.saved_nulls.get(index);
+  }
+  pub value_at(int index): Result<string, string> {
+    if index < 0 || index >= self.saved_values.size then return Err("PostgreSQL row index out of bounds"); fi
+    if self.saved_nulls.get(index) then return Err("PostgreSQL row column is NULL"); fi
+    return Ok(self.saved_values.get(index));
+  }
+end
+
 define module pg as
   // Fail closed for ASCII C0, NUL and DEL in all identifier surfaces.
   // This is NOT full UTF-8 byte-length validation; legacy SQL methods
@@ -666,6 +725,376 @@ define module pg as
     return acquire_connection_checked(
       released.connection_id, new_owner_actor_id, new_actor_generation,
       new_lease_generation, new_tenant_role);
+  }
+
+  // PostgreSQL v3 frontend wire codec. All text crosses the strict shared
+  // String UTF-8 ABI; no host charset conversion or SQL interpolation occurs.
+  pub fnc wire_i16_be(int value): Result<List<int>, string> {
+    if value < 0 || value > 65535 then
+      return Err("PostgreSQL wire i16 outside unsigned range");
+    fi
+    return Ok([(value >> 8) & 255, value & 255]);
+  }
+
+  // Generic PostgreSQL Int32 encoder. Length-bearing call sites perform
+  // their own non-negative/-1 validation; BackendKeyData cancellation secrets
+  // may legitimately occupy the full signed 32-bit domain.
+  pub fnc wire_i32_be(int value): Result<List<int>, string> {
+    if value < -2147483648 || value > 2147483647 then
+      return Err("PostgreSQL wire i32 outside signed range");
+    fi
+    return Ok([
+      (value >> 24) & 255,
+      (value >> 16) & 255,
+      (value >> 8) & 255,
+      value & 255
+    ]);
+  }
+
+  pub fnc wire_cstring(string value): Result<List<int>, string> {
+    val List<int> encoded = value.utf8_bytes();
+    if encoded.size > 1048576 then
+      return Err("PostgreSQL wire string exceeds 1 MiB");
+    fi
+    let mut List<int> out = [];
+    for (val byte_value of encoded) {
+      if byte_value == 0 then
+        return Err("PostgreSQL C-string contains embedded NUL");
+      fi
+      out.add(byte_value);
+    }
+    out.add(0);
+    return Ok(out);
+  }
+
+  // StartupMessage has no leading message type byte. Length includes itself.
+  pub fnc wire_startup_message(string user, string database): Result<List<int>, string> {
+    val user_key = wire_cstring("user");
+    val user_value = wire_cstring(user);
+    val database_key = wire_cstring("database");
+    val database_value = wire_cstring(database);
+    val encoding_key = wire_cstring("client_encoding");
+    val encoding_value = wire_cstring("UTF8");
+    if user_key.is_err() || user_value.is_err()
+      || database_key.is_err() || database_value.is_err()
+      || encoding_key.is_err() || encoding_value.is_err() then
+      return Err("invalid PostgreSQL startup parameter");
+    fi
+
+    let mut List<int> payload = [];
+    val protocol = wire_i32_be(196608);
+    if protocol.is_err() then return Err("invalid PostgreSQL protocol version"); fi
+    for (val b of protocol.unwrap()) { payload.add(b); }
+    for (val b of user_key.unwrap()) { payload.add(b); }
+    for (val b of user_value.unwrap()) { payload.add(b); }
+    for (val b of database_key.unwrap()) { payload.add(b); }
+    for (val b of database_value.unwrap()) { payload.add(b); }
+    for (val b of encoding_key.unwrap()) { payload.add(b); }
+    for (val b of encoding_value.unwrap()) { payload.add(b); }
+    payload.add(0);
+
+    if payload.size > 16777212 then
+      return Err("PostgreSQL startup payload exceeds 16 MiB");
+    fi
+    val length = wire_i32_be(payload.size + 4);
+    if length.is_err() then return Err("invalid PostgreSQL startup length"); fi
+    let mut List<int> frame = [];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of payload) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  pub fnc wire_simple_query_message(string sql): Result<List<int>, string> {
+    val query = wire_cstring(sql);
+    if query.is_err() then return Err("invalid PostgreSQL simple query"); fi
+    val query_bytes = query.unwrap();
+    if query_bytes.size > 16777211 then
+      return Err("PostgreSQL query exceeds 16 MiB");
+    fi
+    val length = wire_i32_be(query_bytes.size + 4);
+    if length.is_err() then return Err("invalid PostgreSQL query length"); fi
+    let mut List<int> frame = [81];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of query_bytes) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  // Parse uses the unnamed statement and lets PostgreSQL infer parameter OIDs
+  // from the checked SQL casts in the plan.
+  pub fnc wire_parse_unnamed_message(TypedQueryPlan plan): Result<List<int>, string> {
+    val statement = wire_cstring("");
+    val query = wire_cstring(plan.sql);
+    val parameter_type_count = wire_i16_be(0);
+    if statement.is_err() || query.is_err() || parameter_type_count.is_err() then
+      return Err("invalid PostgreSQL Parse message");
+    fi
+    let mut List<int> payload = [];
+    for (val b of statement.unwrap()) { payload.add(b); }
+    for (val b of query.unwrap()) { payload.add(b); }
+    for (val b of parameter_type_count.unwrap()) { payload.add(b); }
+    if payload.size > 16777211 then return Err("PostgreSQL Parse payload exceeds 16 MiB"); fi
+    val length = wire_i32_be(payload.size + 4);
+    if length.is_err() then return Err("invalid PostgreSQL Parse length"); fi
+    let mut List<int> frame = [80];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of payload) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  // Bind uses text-format parameters. Query SQL stays in Parse; caller values
+  // are length-delimited here and can never alter SQL bytes.
+  pub fnc wire_bind_unnamed_message(TypedQueryPlan plan): Result<List<int>, string> {
+    if plan.param_count() < 0 || plan.param_count() > 1024 then
+      return Err("PostgreSQL Bind parameter count exceeds 1024");
+    fi
+    val portal = wire_cstring("");
+    val statement = wire_cstring("");
+    val format_count = wire_i16_be(0);
+    val parameter_count = wire_i16_be(plan.param_count());
+    val result_format_count = wire_i16_be(0);
+    if portal.is_err() || statement.is_err() || format_count.is_err()
+      || parameter_count.is_err() || result_format_count.is_err() then
+      return Err("invalid PostgreSQL Bind header");
+    fi
+
+    let mut List<int> payload = [];
+    for (val b of portal.unwrap()) { payload.add(b); }
+    for (val b of statement.unwrap()) { payload.add(b); }
+    for (val b of format_count.unwrap()) { payload.add(b); }
+    for (val b of parameter_count.unwrap()) { payload.add(b); }
+
+    for (let int index = 0; index < plan.param_count(); index++) {
+      val parameter = plan.param_at(index);
+      if parameter.is_err() then return Err("missing PostgreSQL typed bind"); fi
+      val value = parameter.unwrap();
+      if !admitted_db_value(rt borrow value) then
+        return Err("unadmitted PostgreSQL bind at wire boundary");
+      fi
+      if value.is_null then
+        val null_length = wire_i32_be(-1);
+        if null_length.is_err() then return Err("invalid PostgreSQL NULL length"); fi
+        for (val b of null_length.unwrap()) { payload.add(b); }
+      else
+        val List<int> encoded = value.scalar.utf8_bytes();
+        if encoded.size > 1048576 then
+          return Err("PostgreSQL bind value exceeds 1 MiB");
+        fi
+        val scalar_length = wire_i32_be(encoded.size);
+        if scalar_length.is_err() then return Err("invalid PostgreSQL bind length"); fi
+        for (val b of scalar_length.unwrap()) { payload.add(b); }
+        for (val b of encoded) { payload.add(b); }
+      fi
+      if payload.size > 16777211 then
+        return Err("PostgreSQL Bind payload exceeds 16 MiB");
+      fi
+    }
+
+    for (val b of result_format_count.unwrap()) { payload.add(b); }
+    val length = wire_i32_be(payload.size + 4);
+    if length.is_err() then return Err("invalid PostgreSQL Bind frame length"); fi
+    let mut List<int> frame = [66];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of payload) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  pub fnc wire_describe_unnamed_portal_message(): List<int> {
+    // 'D', length=6, target='P' (portal), empty portal C-string.
+    return [68, 0, 0, 0, 6, 80, 0];
+  }
+
+  pub fnc wire_execute_unnamed_message(int max_rows): Result<List<int>, string> {
+    if max_rows < 0 || max_rows > 2147483647 then
+      return Err("invalid PostgreSQL Execute row limit");
+    fi
+    val portal = wire_cstring("");
+    val row_limit = wire_i32_be(max_rows);
+    if portal.is_err() || row_limit.is_err() then
+      return Err("invalid PostgreSQL Execute message");
+    fi
+    let mut List<int> payload = [];
+    for (val b of portal.unwrap()) { payload.add(b); }
+    for (val b of row_limit.unwrap()) { payload.add(b); }
+    val length = wire_i32_be(payload.size + 4);
+    if length.is_err() then return Err("invalid PostgreSQL Execute length"); fi
+    let mut List<int> frame = [69];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of payload) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  pub fnc wire_sync_message(): List<int> {
+    return [83, 0, 0, 0, 4];
+  }
+
+  // CancelRequest is a separate connection startup packet with no type byte.
+  // PostgreSQL authenticates it with the backend process id + secret from
+  // BackendKeyData. The cancel socket receives no protocol response.
+  pub fnc wire_cancel_request(PgBackendKeyData key_data): Result<List<int>, string> {
+    if key_data.process_id <= 0 || key_data.process_id > 2147483647 then
+      return Err("invalid PostgreSQL backend process id");
+    fi
+    val length = wire_i32_be(16);
+    val code = wire_i32_be(80877102);
+    val process_id = wire_i32_be(key_data.process_id);
+    val secret = wire_i32_be(key_data.secret_key);
+    if length.is_err() || code.is_err() || process_id.is_err() || secret.is_err() then
+      return Err("invalid PostgreSQL CancelRequest identity");
+    fi
+    let mut List<int> frame = [];
+    for (val b of length.unwrap()) { frame.add(b); }
+    for (val b of code.unwrap()) { frame.add(b); }
+    for (val b of process_id.unwrap()) { frame.add(b); }
+    for (val b of secret.unwrap()) { frame.add(b); }
+    return Ok(frame);
+  }
+
+  pub fnc wire_byte_checked(borrow List<int> bytes, int index): Result<int, string> {
+    if index < 0 || index >= bytes.size then return Err("PostgreSQL wire byte index out of bounds"); fi
+    val value = bytes.get(index);
+    if value < 0 || value > 255 then return Err("PostgreSQL wire byte outside 0..255"); fi
+    return Ok(value);
+  }
+
+  pub fnc wire_read_i16_be(borrow List<int> bytes, int offset): Result<int, string> {
+    val a = wire_byte_checked(rt borrow bytes, offset);
+    val b = wire_byte_checked(rt borrow bytes, offset + 1);
+    if a.is_err() || b.is_err() then return Err("truncated PostgreSQL wire i16"); fi
+    return Ok((a.unwrap() << 8) | b.unwrap());
+  }
+
+  pub fnc wire_read_i32_be(borrow List<int> bytes, int offset): Result<int, string> {
+    val a = wire_byte_checked(rt borrow bytes, offset);
+    val b = wire_byte_checked(rt borrow bytes, offset + 1);
+    val c = wire_byte_checked(rt borrow bytes, offset + 2);
+    val d = wire_byte_checked(rt borrow bytes, offset + 3);
+    if a.is_err() || b.is_err() || c.is_err() || d.is_err() then
+      return Err("truncated PostgreSQL wire i32");
+    fi
+    val unsigned_value = (a.unwrap() << 24) | (b.unwrap() << 16) | (c.unwrap() << 8) | d.unwrap();
+    if unsigned_value >= 2147483648 then return Ok(unsigned_value - 4294967296); fi
+    return Ok(unsigned_value);
+  }
+
+  pub fnc wire_backend_frame_checked(List<int> bytes): Result<PgBackendFrame, string> {
+    if bytes.size < 5 then return Err("truncated PostgreSQL backend frame header"); fi
+    val type_tag = wire_byte_checked(rt borrow bytes, 0);
+    val length = wire_read_i32_be(rt borrow bytes, 1);
+    if type_tag.is_err() || length.is_err() then return Err("invalid PostgreSQL backend frame header"); fi
+    if length.unwrap() < 4 || length.unwrap() > 16777216 then
+      return Err("PostgreSQL backend frame length outside 4..16MiB");
+    fi
+    if bytes.size != length.unwrap() + 1 then
+      return Err("PostgreSQL backend frame length does not match buffer");
+    fi
+    let mut List<int> payload = [];
+    for (let int index = 5; index < bytes.size; index++) {
+      val byte_value = wire_byte_checked(rt borrow bytes, index);
+      if byte_value.is_err() then return Err("invalid PostgreSQL backend payload byte"); fi
+      payload.add(byte_value.unwrap());
+    }
+    return Ok(new PgBackendFrame(type_tag.unwrap(), payload));
+  }
+
+  pub fnc wire_authentication_code(PgBackendFrame frame): Result<int, string> {
+    if frame.type_tag != 82 then return Err("PostgreSQL backend message is not Authentication"); fi
+    val payload = frame.payload();
+    if payload.size < 4 then return Err("truncated PostgreSQL Authentication payload"); fi
+    return wire_read_i32_be(rt borrow payload, 0);
+  }
+
+  pub fnc wire_backend_key_data(PgBackendFrame frame): Result<PgBackendKeyData, string> {
+    if frame.type_tag != 75 then return Err("PostgreSQL backend message is not BackendKeyData"); fi
+    val payload = frame.payload();
+    if payload.size != 8 then return Err("invalid PostgreSQL BackendKeyData length"); fi
+    val process_id = wire_read_i32_be(rt borrow payload, 0);
+    val secret_key = wire_read_i32_be(rt borrow payload, 4);
+    if process_id.is_err() || secret_key.is_err() then return Err("invalid PostgreSQL BackendKeyData"); fi
+    return Ok(new PgBackendKeyData(process_id.unwrap(), secret_key.unwrap()));
+  }
+
+  pub fnc wire_ready_status(PgBackendFrame frame): Result<string, string> {
+    if frame.type_tag != 90 then return Err("PostgreSQL backend message is not ReadyForQuery"); fi
+    val payload = frame.payload();
+    if payload.size != 1 then return Err("invalid PostgreSQL ReadyForQuery length"); fi
+    return Ok(payload.utf8_string());
+  }
+
+  pub fnc wire_error_response_checked(PgBackendFrame frame): Result<PgBackendError, string> {
+    if frame.type_tag != 69 then return Err("PostgreSQL backend message is not ErrorResponse"); fi
+    val payload = frame.payload();
+    let string sqlstate = "";
+    let string message = "";
+    let int index = 0;
+    let int fields = 0;
+    while index < payload.size {
+      val field_type = wire_byte_checked(rt borrow payload, index);
+      if field_type.is_err() then return Err("invalid PostgreSQL ErrorResponse field type"); fi
+      index = index + 1;
+      if field_type.unwrap() == 0 then
+        if index != payload.size then return Err("trailing bytes after PostgreSQL ErrorResponse terminator"); fi
+        if sqlstate == "" then return Err("PostgreSQL ErrorResponse missing SQLSTATE"); fi
+        return Ok(new PgBackendError(sqlstate, message));
+      fi
+      let mut List<int> value_bytes = [];
+      let bool terminated = false;
+      while index < payload.size {
+        val byte_value = wire_byte_checked(rt borrow payload, index);
+        if byte_value.is_err() then return Err("invalid PostgreSQL ErrorResponse text byte"); fi
+        index = index + 1;
+        if byte_value.unwrap() == 0 then
+          terminated = true;
+          break;
+        fi
+        if value_bytes.size >= 1048576 then return Err("PostgreSQL ErrorResponse field exceeds 1 MiB"); fi
+        value_bytes.add(byte_value.unwrap());
+      }
+      if !terminated then return Err("unterminated PostgreSQL ErrorResponse field"); fi
+      val decoded = value_bytes.utf8_string();
+      if field_type.unwrap() == 67 then sqlstate = decoded; fi
+      if field_type.unwrap() == 77 then message = decoded; fi
+      fields = fields + 1;
+      if fields > 64 then return Err("too many PostgreSQL ErrorResponse fields"); fi
+    }
+    return Err("PostgreSQL ErrorResponse missing terminator");
+  }
+
+  pub fnc wire_data_row_checked(PgBackendFrame frame): Result<PgTextRow, string> {
+    if frame.type_tag != 68 then return Err("PostgreSQL backend message is not DataRow"); fi
+    val payload = frame.payload();
+    val count = wire_read_i16_be(rt borrow payload, 0);
+    if count.is_err() then return Err("truncated PostgreSQL DataRow column count"); fi
+    if count.unwrap() > 4096 then return Err("PostgreSQL DataRow column count exceeds 4096"); fi
+    let int offset = 2;
+    let mut List<string> values = [];
+    let mut List<bool> nulls = [];
+    for (let int column = 0; column < count.unwrap(); column++) {
+      val length = wire_read_i32_be(rt borrow payload, offset);
+      if length.is_err() then return Err("truncated PostgreSQL DataRow column length"); fi
+      offset = offset + 4;
+      if length.unwrap() == -1 then
+        values.add("");
+        nulls.add(true);
+      else
+        if length.unwrap() < 0 || length.unwrap() > 1048576 then
+          return Err("PostgreSQL DataRow column length outside supported range");
+        fi
+        if offset + length.unwrap() > payload.size then
+          return Err("truncated PostgreSQL DataRow column payload");
+        fi
+        let mut List<int> value_bytes = [];
+        for (let int byte_index = 0; byte_index < length.unwrap(); byte_index++) {
+          val byte_value = wire_byte_checked(rt borrow payload, offset + byte_index);
+          if byte_value.is_err() then return Err("invalid PostgreSQL DataRow byte"); fi
+          value_bytes.add(byte_value.unwrap());
+        }
+        values.add(value_bytes.utf8_string());
+        nulls.add(false);
+        offset = offset + length.unwrap();
+      fi
+    }
+    if offset != payload.size then return Err("trailing bytes in PostgreSQL DataRow"); fi
+    return Ok(new PgTextRow(values, nulls));
   }
 
 end
