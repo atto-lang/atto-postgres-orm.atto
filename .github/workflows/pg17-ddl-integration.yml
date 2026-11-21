@@ -5,6 +5,10 @@ on:
       - 'src/pg.ores'
       - 'tests/plans.ores'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/pg17-prepared-binds.bash'
+      - 'tests/pg17-bind-failures.bash'
+      - 'tests/pg17-rls-contract.bash'
+      - 'tests/pg17-cancel-transaction.bash'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg17-ddl-integration.yml'
   workflow_dispatch:
@@ -38,13 +42,21 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client
           psql --version
-      - name: Execute SQL-only constraint contract and mandatory rollback
+      - name: Execute SQL-only database contracts
         shell: bash
         env:
           PG_TEST_DISPOSABLE: I_ACKNOWLEDGE_DISPOSABLE_DATABASE
           PG_TEST_DSN: postgresql://orm_contract:local_ci_test_only@localhost:5432/orm_contract
         run: |
           set -euo pipefail
-          bash -n tests/pg17-ddl-contract.bash
-          bash tests/pg17-ddl-contract.bash
-          printf '%s\n' 'SQL_ONLY_DB_GATE_COMPLETE: Does not compile Oreslang or verify RLS/driver/backend parity'
+          for script in \
+            tests/pg17-ddl-contract.bash \
+            tests/pg17-prepared-binds.bash \
+            tests/pg17-bind-failures.bash \
+            tests/pg17-rls-contract.bash \
+            tests/pg17-cancel-transaction.bash
+          do
+            bash -n "$script"
+            bash "$script"
+          done
+          printf '%s\n' 'SQL_ONLY_DB_GATE_COMPLETE: Does not compile Oreslang or prove driver/actor/backend parity'
