@@ -1,0 +1,296 @@
+import module schema from '../src/schema';
+pub routine main(): void {
+  if !schema.admitted_name("workspace_id") then panic("valid portable identity rejected"); fi
+  if schema.admitted_name("public.users") then panic("qualified identifier admitted"); fi
+  if schema.admitted_name("users|drop") then panic("sentinel admitted"); fi
+  if schema.admitted_name("usér") then panic("Unicode identifier admitted"); fi
+  if schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then
+    panic("64-byte identifier admitted");
+  fi
+  if !schema.admitted_name("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") then
+    panic("63-byte identifier rejected");
+  fi
+  if schema.admitted_kind("text; DROP TABLE users") then panic("SQL type admitted"); fi
+  if !schema.admitted_kind("string") then panic("neutral string kind rejected"); fi
+
+  val current = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val wanted = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("name", "display_name", "string", false),
+    schema.column("email", "email", "string", true),
+    schema.column("flag", "flag", "boolean", false)
+  ]);
+  if current.is_err() || wanted.is_err() then panic("valid neutral schema rejected"); fi
+  val wanted_table = wanted.unwrap();
+  val current_table = current.unwrap();
+  val plan = schema.diff_checked(rt borrow wanted_table, rt borrow current_table);
+  if plan.is_err() then panic("reviewable diff rejected"); fi
+  if plan.unwrap().step_count() != 4 then panic("unexpected schema plan count"); fi
+  if plan.unwrap().step_at(0).unwrap().op != "review_column_rename" then
+    panic("stable-id rename was not flagged");
+  fi
+  if plan.unwrap().step_at(1).unwrap().op != "add_nullable_column" then
+    panic("safe nullable addition missing");
+  fi
+  if plan.unwrap().step_at(2).unwrap().risk != "preflight" then
+    panic("required addition was not gated");
+  fi
+  if plan.unwrap().step_at(3).unwrap().risk != "destructive" then
+    panic("drop was not classified destructive");
+  fi
+  if !plan.unwrap().has_blockers() then panic("unsafe plan marked safe"); fi
+  if !plan.unwrap().step_at(-1).is_err() then panic("negative plan index admitted"); fi
+  if !plan.unwrap().step_at(4).is_err() then panic("overrun plan index admitted"); fi
+
+  val identical = schema.diff_checked(rt borrow current_table, rt borrow current_table);
+  if identical.is_err() || identical.unwrap().step_count() != 0 then
+    panic("identical catalog drift detected");
+  fi
+  val relaxed = schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", true),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val relaxed_table = relaxed.unwrap();
+  val relaxed_plan = schema.diff_checked(rt borrow relaxed_table, rt borrow current_table);
+  if relaxed_plan.is_err() || relaxed_plan.unwrap().step_count() != 1 then
+    panic("nullable relaxation not planned");
+  fi
+  if relaxed_plan.unwrap().step_at(0).unwrap().op != "drop_not_null" then
+    panic("nullable relaxation operation changed");
+  fi
+
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("id", "other", "uuid", false)
+  ]).is_err() then panic("duplicate stable column id admitted"); fi
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "uuid", false),
+    schema.column("other", "id", "uuid", false)
+  ]).is_err() then panic("duplicate column name admitted"); fi
+  if !schema.table_checked("users", "users", arr[
+    schema.column("id", "id", "DROP TABLE", false)
+  ]).is_err() then panic("unsupported logical type admitted"); fi
+  if !schema.table_checked("users", "users", arr[]).is_err() then panic("empty table admitted"); fi
+
+  val corrupted_mapping = schema.table_checked("users", "users", arr[
+    schema.column("other_id", "id", "uuid", false),
+    schema.column("name", "name", "string", false),
+    schema.column("legacy", "legacy", "string", true)
+  ]);
+  val corrupted_table = corrupted_mapping.unwrap();
+  if !schema.diff_checked(rt borrow current_table, rt borrow corrupted_table).is_err() then
+    panic("stable identity mapping conflict accepted");
+  fi
+  val different_table = schema.table_checked("different", "users", arr[
+    schema.column("id", "id", "uuid", false)
+  ]);
+  val different_table_value = different_table.unwrap();
+  if !schema.diff_checked(rt borrow current_table, rt borrow different_table_value).is_err() then
+    panic("different table identities accepted");
+  fi
+  // Constructors are public: diff must revalidate instead of trusting them.
+  val fabricated = new SchemaTable("users", "users", arr[
+    schema.column("id", "id", "arbitrary-sql", false)
+  ]);
+  if !schema.diff_checked(rt borrow fabricated, rt borrow current_table).is_err() then
+    panic("unvalidated direct-constructor schema admitted");
+  fi
+
+  // AOT preview is never an authorization to publish or run generated code.
+  val label_result = schema.table_checked("labels", "labels", arr[
+    schema.column("label", "label", "string", false),
+    schema.column("enabled", "enabled", "boolean", false)
+  ]);
+  if label_result.is_err() then panic("preview table fixture rejected"); fi
+  val labels = label_result.unwrap();
+  val model_preview = schema.model_source_preview_checked(rt borrow labels);
+  if model_preview.is_err() then panic("simple nominal model preview rejected"); fi
+  if model_preview.unwrap() != "// ORESLANG_MODEL_PREVIEW_ONLY_NOT_AUTHORIZED\n"
+    + "pub define class orm_labels as\n"
+    + "  pub val string field_label;\n"
+    + "  pub val bool field_enabled;\n"
+    + "  pub constructor(string field_label, bool field_enabled) {\n"
+    + "    self.field_label = field_label;\n"
+    + "    self.field_enabled = field_enabled;\n"
+    + "  }\nend\n" then
+    panic("nominal model preview source drift");
+  fi
+  val model_repeated = schema.model_source_preview_checked(rt borrow labels);
+  if model_repeated.is_err() || model_repeated.unwrap() != model_preview.unwrap() then
+    panic("nominal model preview not deterministic");
+  fi
+  val descriptor_preview = schema.table_descriptor_source_preview_checked(rt borrow labels);
+  if descriptor_preview.is_err() then panic("neutral descriptor source rejected"); fi
+  if descriptor_preview.unwrap() !=
+    "schema.table_checked(\"labels\", \"labels\", arr["
+    + "schema.column(\"label\", \"label\", \"string\", false), "
+    + "schema.column(\"enabled\", \"enabled\", \"boolean\", false)])" then
+    panic("stable-ID descriptor source drift");
+  fi
+  val nullable_table = schema.table_checked("labels", "labels", arr[
+    schema.column("label", "label", "string", true)
+  ]);
+  if nullable_table.is_err() then panic("nullable preview fixture rejected"); fi
+  val nullable_value = nullable_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow nullable_value).is_err() then
+    panic("nullable field erased into nonnullable source");
+  fi
+  val uuid_table = schema.table_checked("ids", "ids", arr[
+    schema.column("id", "id", "uuid", false)
+  ]);
+  if uuid_table.is_err() then panic("UUID preview fixture rejected"); fi
+  val uuid_value = uuid_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow uuid_value).is_err() then
+    panic("UUID silently lowered to unvalidated string");
+  fi
+  val too_long_table = schema.table_checked(
+    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "labels", arr[schema.column("id", "id", "string", false)]);
+  if too_long_table.is_err() then panic("valid long source stable ID rejected"); fi
+  val too_long = too_long_table.unwrap();
+  if !schema.model_source_preview_checked(rt borrow too_long).is_err() then
+    panic("oversized generated model identifier accepted");
+  fi
+  val too_long_field = schema.table_checked("labels", "labels", arr[
+    schema.column("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "label", "string", false)
+  ]);
+  if too_long_field.is_err() then panic("valid long column stable ID rejected"); fi
+  val too_long_field_value = too_long_field.unwrap();
+  if !schema.model_source_preview_checked(rt borrow too_long_field_value).is_err() then
+    panic("oversized generated member identifier accepted");
+  fi
+  val forged_codegen = new SchemaTable("labels", "unsafe;DROP", arr[
+    schema.column("label", "label", "string", false)
+  ]);
+  if !schema.model_source_preview_checked(rt borrow forged_codegen).is_err() then
+    panic("public-constructor forged identifier entered codegen");
+  fi
+  if !schema.table_descriptor_source_preview_checked(rt borrow forged_codegen).is_err() then
+    panic("public-constructor forged identifier entered source descriptor");
+  fi
+
+
+  // Complete portable catalog changes retain per-table stable IDs.
+  val current_cat_result = schema.catalog_checked(arr[current_table]);
+  val wanted_cat_result = schema.catalog_checked(arr[wanted_table]);
+  if current_cat_result.is_err() || wanted_cat_result.is_err() then
+    panic("valid whole catalog rejected");
+  fi
+  val current_cat = current_cat_result.unwrap();
+  val wanted_cat = wanted_cat_result.unwrap();
+  val combined = schema.diff_catalog_checked(rt borrow wanted_cat, rt borrow current_cat);
+  if combined.is_err() || combined.unwrap().step_count() != 4 then
+    panic("whole catalog failed to preserve per-table diff");
+  fi
+  val equal_cat = schema.diff_catalog_checked(rt borrow current_cat, rt borrow current_cat);
+  if equal_cat.is_err() || equal_cat.unwrap().step_count() != 0 then
+    panic("equal whole catalogs produced drift");
+  fi
+  if !schema.catalog_checked(arr[current_table, current_table]).is_err() then
+    panic("duplicate stable table ID admitted");
+  fi
+  val duplicate_name = new SchemaTable("different", "users", arr[
+    schema.column("id","id","uuid",false)
+  ]);
+  if !schema.catalog_checked(arr[current_table, duplicate_name]).is_err() then
+    panic("duplicate physical table name admitted");
+  fi
+  val added_cat_result = schema.catalog_checked(arr[current_table, labels]);
+  if added_cat_result.is_err() then panic("extra table catalog rejected"); fi
+  val added_cat = added_cat_result.unwrap();
+  val created = schema.diff_catalog_checked(rt borrow added_cat, rt borrow current_cat);
+  if created.is_err() || created.unwrap().step_count() != 1 then
+    panic("new table missing from catalog plan");
+  fi
+  if created.unwrap().step_at(0).unwrap().op != "review_create_table" ||
+    created.unwrap().step_at(0).unwrap().risk != "manual" then
+    panic("new table silently authorized");
+  fi
+  val dropped = schema.diff_catalog_checked(rt borrow current_cat, rt borrow added_cat);
+  if dropped.is_err() || dropped.unwrap().step_count() != 1 then
+    panic("removed table missing from catalog plan");
+  fi
+  if dropped.unwrap().step_at(0).unwrap().op != "review_drop_table" ||
+    dropped.unwrap().step_at(0).unwrap().risk != "destructive" then
+    panic("table drop silently authorized");
+  fi
+  val conflicting_cat_result = schema.catalog_checked(arr[duplicate_name]);
+  if conflicting_cat_result.is_err() then panic("valid alternate stable ID fixture rejected"); fi
+  val conflicting_cat = conflicting_cat_result.unwrap();
+  if !schema.diff_catalog_checked(rt borrow conflicting_cat, rt borrow current_cat).is_err() then
+    panic("same physical name different stable table IDs accepted");
+  fi
+  val forged_cat = new SchemaCatalog(arr[
+    new SchemaTable("users", "bad;drop", arr[
+      schema.column("id","id","uuid",false)
+    ])
+  ]);
+  if !schema.diff_catalog_checked(rt borrow forged_cat, rt borrow current_cat).is_err() then
+    panic("forged public catalog admitted");
+  fi
+  let mut Array<SchemaTable> table_inputs = arr[current_table];
+  val saved_cat = schema.catalog_checked(table_inputs);
+  if saved_cat.is_err() then panic("snapshot catalog fixture rejected"); fi
+  table_inputs.add(labels);
+  if saved_cat.unwrap().tables().size != 1 then
+    panic("post-admission array mutation modified catalog");
+  fi
+
+
+  // Review manifests are always non-authorizing, even for "safe" steps.
+  val created_plan = created.unwrap();
+  val emitted_manifest = schema.review_manifest_preview_checked(rt borrow created_plan);
+  if emitted_manifest.is_err() then panic("valid review manifest rejected"); fi
+  if emitted_manifest.unwrap() !=
+    "{\"schema\":\"ores.orm.plan-preview/v1\","
+    + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+    + "\"scope\":\"column_shapes_only\",\"steps\":["
+    + "{\"op\":\"review_create_table\",\"table_id\":\"labels\","
+    + "\"column_id\":\"\",\"risk\":\"manual\"}]}" then
+    panic("review manifest shape or approval status drift");
+  fi
+  val adversarial_sql = new SchemaPlan(arr[
+    new SchemaStep("DROP TABLE users", "users", "", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_sql).is_err() then
+    panic("forged SQL operation entered review manifest");
+  fi
+  val adversarial_risk = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "password", "safe")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_risk).is_err() then
+    panic("destructive operation risk was downgraded");
+  fi
+  val adversarial_id = new SchemaPlan(arr[
+    new SchemaStep("drop_column", "users", "bad\\\"id", "destructive")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow adversarial_id).is_err() then
+    panic("unescaped JSON injection identifier entered review manifest");
+  fi
+  val wrong_scope = new SchemaPlan(arr[
+    new SchemaStep("review_create_table", "users", "unexpected", "manual")
+  ]);
+  if !schema.review_manifest_preview_checked(rt borrow wrong_scope).is_err() then
+    panic("table-only operation accepted a column identity");
+  fi
+  val actual_drop_plan = dropped.unwrap();
+  val dropped_manifest = schema.review_manifest_preview_checked(rt borrow actual_drop_plan);
+  if dropped_manifest.is_err() then panic("destructive review manifest rejected"); fi
+  if dropped_manifest.unwrap() !=
+    "{\"schema\":\"ores.orm.plan-preview/v1\","
+    + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+    + "\"scope\":\"column_shapes_only\",\"steps\":["
+    + "{\"op\":\"review_drop_table\",\"table_id\":\"labels\","
+    + "\"column_id\":\"\",\"risk\":\"destructive\"}]}" then
+    panic("destructive review manifest lost risk");
+  fi
+
+  stdio.println("Pure Oreslang schema-diff planning contracts passed");
+  return;
+}

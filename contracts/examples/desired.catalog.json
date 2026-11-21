@@ -1,0 +1,35 @@
+{
+  "schema_version": "ores.orm.catalog/v1",
+  "tables": [
+    {
+      "stable_id": "users",
+      "name": "users",
+      "columns": [
+        {
+          "stable_id": "id",
+          "name": "id",
+          "kind": "uuid",
+          "nullable": false
+        },
+        {
+          "stable_id": "name",
+          "name": "display_name",
+          "kind": "string",
+          "nullable": false
+        },
+        {
+          "stable_id": "email",
+          "name": "email",
+          "kind": "string",
+          "nullable": true
+        },
+        {
+          "stable_id": "flag",
+          "name": "flag",
+          "kind": "boolean",
+          "nullable": false
+        }
+      ]
+    }
+  ]
+}

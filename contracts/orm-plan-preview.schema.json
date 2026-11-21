@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:ores:orm:plan-preview:v1",
+  "description": "Review-only stable-ID column-shape proposal. This does not grant DPM migration authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "status",
+    "approved",
+    "scope",
+    "steps"
+  ],
+  "properties": {
+    "schema": {
+      "const": "ores.orm.plan-preview/v1"
+    },
+    "status": {
+      "const": "STOPPED_FOR_EVALUATION"
+    },
+    "approved": {
+      "const": false
+    },
+    "scope": {
+      "const": "column_shapes_only"
+    },
+    "steps": {
+      "type": "array",
+      "maxItems": 2048,
+      "items": {
+        "$ref": "#/$defs/Step"
+      }
+    }
+  },
+  "$defs": {
+    "Step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "op",
+        "table_id",
+        "column_id",
+        "risk"
+      ],
+      "properties": {
+        "op": {
+          "enum": [
+            "review_table_rename",
+            "review_create_table",
+            "review_drop_table",
+            "review_column_rename",
+            "review_type_change",
+            "drop_not_null",
+            "add_nullable_column",
+            "set_not_null",
+            "add_required_column",
+            "drop_column"
+          ]
+        },
+        "table_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z_][A-Za-z0-9_]*(?![\\s\\S])",
+          "minLength": 1,
+          "maxLength": 63
+        },
+        "column_id": {
+          "type": "string",
+          "pattern": "^(?:[A-Za-z_][A-Za-z0-9_]*)?(?![\\s\\S])",
+          "maxLength": 63
+        },
+        "risk": {
+          "enum": [
+            "safe",
+            "preflight",
+            "manual",
+            "destructive"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "review_table_rename",
+                  "review_create_table",
+                  "review_drop_table"
+                ]
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "properties": {
+              "column_id": {
+                "const": ""
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "column_id": {
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "review_table_rename",
+                  "review_create_table",
+                  "review_column_rename",
+                  "review_type_change"
+                ]
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "properties": {
+              "risk": {
+                "const": "manual"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "review_drop_table",
+                  "drop_column"
+                ]
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "properties": {
+              "risk": {
+                "const": "destructive"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "drop_not_null",
+                  "add_nullable_column"
+                ]
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "properties": {
+              "risk": {
+                "const": "safe"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "op": {
+                "enum": [
+                  "set_not_null",
+                  "add_required_column"
+                ]
+              }
+            },
+            "required": [
+              "op"
+            ]
+          },
+          "then": {
+            "properties": {
+              "risk": {
+                "const": "preflight"
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

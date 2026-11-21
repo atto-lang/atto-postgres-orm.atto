@@ -1,0 +1,223 @@
+// Metamorphic pure-Oreslang catalog regressions; no DB, FFI or migration apply.
+import module schema from '../src/schema';
+pub routine main(): void {
+  val key = schema.column("key","key","string",false);
+  val state = schema.column("state","state","boolean",false);
+  val opt = schema.column("optional","optional","string",true);
+  val a_r = schema.table_checked("alpha","physical_alpha",arr[key,state]);
+  val b_r = schema.table_checked("beta","physical_beta",arr[key]);
+  if a_r.is_err() || b_r.is_err() then panic("valid table fixtures rejected"); fi
+  val a = a_r.unwrap();
+  val b = b_r.unwrap();
+  val ab_r = schema.catalog_checked(arr[a,b]);
+  val ba_r = schema.catalog_checked(arr[b,a]);
+  if ab_r.is_err() || ba_r.is_err() then panic("catalog fixtures rejected"); fi
+  val ab = ab_r.unwrap();
+  val ba = ba_r.unwrap();
+  val equal_ab = schema.diff_catalog_checked(rt borrow ab,rt borrow ab);
+  val equal_ba = schema.diff_catalog_checked(rt borrow ba,rt borrow ba);
+  if equal_ab.is_err() || equal_ba.is_err() then panic("same catalog diff rejected"); fi
+  if equal_ab.unwrap().step_count() != 0 then panic("AB emitted fake drift"); fi
+  if equal_ba.unwrap().step_count() != 0 then panic("BA emitted fake drift"); fi
+  val permuted = schema.diff_catalog_checked(rt borrow ab,rt borrow ba);
+  if permuted.is_err() then panic("table permutation should preserve identity"); fi
+  if permuted.unwrap().step_count() != 0 then panic("table permutation emitted DDL"); fi
+  val empty_r = schema.catalog_checked(arr[]);
+  if empty_r.is_err() then panic("empty catalog rejected"); fi
+  val empty = empty_r.unwrap();
+  val created = schema.diff_catalog_checked(rt borrow ab,rt borrow empty);
+  if created.is_err() then panic("create catalog diff rejected"); fi
+  if created.unwrap().step_count() != 2 then panic("two create steps expected"); fi
+  if created.unwrap().step_at(0).unwrap().table_id != "alpha" then panic("first created identity wrong"); fi
+  if created.unwrap().step_at(1).unwrap().table_id != "beta" then panic("second created identity wrong"); fi
+  if created.unwrap().step_at(0).unwrap().op != "review_create_table" then panic("table create not reviewed"); fi
+  if created.unwrap().step_at(1).unwrap().risk != "manual" then panic("table create not manual"); fi
+  val deleted = schema.diff_catalog_checked(rt borrow empty,rt borrow ab);
+  if deleted.is_err() then panic("delete catalog diff rejected"); fi
+  if deleted.unwrap().step_count() != 2 then panic("two drop steps expected"); fi
+  if deleted.unwrap().step_at(0).unwrap().op != "review_drop_table" then panic("drop operation wrong"); fi
+  if deleted.unwrap().step_at(1).unwrap().risk != "destructive" then panic("drop risk downgraded"); fi
+  if !created.unwrap().has_blockers() then panic("creation review is not a blocker"); fi
+  if !deleted.unwrap().has_blockers() then panic("deletion review is not a blocker"); fi
+  val created_plan = created.unwrap();
+  val deleted_plan = deleted.unwrap();
+  val created_manifest = schema.review_manifest_preview_checked(rt borrow created_plan);
+  val deleted_manifest = schema.review_manifest_preview_checked(rt borrow deleted_plan);
+  if created_manifest.is_err() || deleted_manifest.is_err() then panic("multi-step review rejected"); fi
+  if created_manifest.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == created_manifest.unwrap() then panic("create manifest status lost"); fi
+  if deleted_manifest.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == deleted_manifest.unwrap() then panic("drop manifest status lost"); fi
+  val renamed_r = schema.table_checked("alpha","renamed_alpha",arr[key,state]);
+  if renamed_r.is_err() then panic("renamed table fixture rejected"); fi
+  val renamed_cat_r = schema.catalog_checked(arr[renamed_r.unwrap(),b]);
+  if renamed_cat_r.is_err() then panic("renamed catalog rejected"); fi
+  val renamed_cat = renamed_cat_r.unwrap();
+  val rename_diff = schema.diff_catalog_checked(rt borrow renamed_cat,rt borrow ab);
+  if rename_diff.is_err() || rename_diff.unwrap().step_count() != 1 then panic("rename diff not singular"); fi
+  if rename_diff.unwrap().step_at(0).unwrap().op != "review_table_rename" then panic("stable ID rename not flagged"); fi
+  if rename_diff.unwrap().step_at(0).unwrap().risk != "manual" then panic("rename bypassed human review"); fi
+  val collision_r = schema.table_checked("alpha","physical_beta",arr[key,state]);
+  if collision_r.is_err() then panic("valid alternate physical name rejected"); fi
+  val collision_cat_r = schema.catalog_checked(arr[collision_r.unwrap()]);
+  if collision_cat_r.is_err() then panic("valid standalone alternate catalog rejected"); fi
+  val collision_cat = collision_cat_r.unwrap();
+  if !schema.diff_catalog_checked(rt borrow collision_cat,rt borrow ab).is_err() then panic("cross-table physical-name collision admitted"); fi
+  val extra_r = schema.table_checked("alpha","physical_alpha",arr[key,state,opt]);
+  if extra_r.is_err() then panic("nullable extension fixture rejected"); fi
+  val extended_r = schema.catalog_checked(arr[extra_r.unwrap(),b]);
+  if extended_r.is_err() then panic("extended catalog rejected"); fi
+  val extended = extended_r.unwrap();
+  val add_field = schema.diff_catalog_checked(rt borrow extended,rt borrow ab);
+  if add_field.is_err() || add_field.unwrap().step_count() != 1 then panic("nullable add diff wrong"); fi
+  if add_field.unwrap().step_at(0).unwrap().op != "add_nullable_column" then panic("nullable add op wrong"); fi
+  val remove_field = schema.diff_catalog_checked(rt borrow ab,rt borrow extended);
+  if remove_field.is_err() || remove_field.unwrap().step_count() != 1 then panic("reverse diff wrong"); fi
+  if remove_field.unwrap().step_at(0).unwrap().op != "drop_column" then panic("reverse op not drop"); fi
+  if remove_field.unwrap().step_at(0).unwrap().risk != "destructive" then panic("reverse drop risk not destructive"); fi
+  val model_a = schema.model_source_preview_checked(rt borrow a);
+  val model_again = schema.model_source_preview_checked(rt borrow a);
+  if model_a.is_err() || model_again.is_err() then panic("supported model preview rejected"); fi
+  if model_a.unwrap() != model_again.unwrap() then panic("same model preview was nondeterministic"); fi
+  if model_a.unwrap().replace_literal("pub define class orm_alpha as","") == model_a.unwrap() then panic("stable ID absent from generated class"); fi
+  if model_a.unwrap().replace_literal("pub val bool field_state;","") == model_a.unwrap() then panic("bool field missing from generated class"); fi
+  val extra_table = extra_r.unwrap();
+  val desc = schema.table_descriptor_source_preview_checked(rt borrow extra_table);
+  if desc.is_err() then panic("nullable descriptor incorrectly rejected"); fi
+  if desc.unwrap().replace_literal("true","") == desc.unwrap() then panic("nullable descriptor lost true value"); fi
+  if !schema.model_source_preview_checked(rt borrow extra_table).is_err() then panic("unsupported nullable class lowered"); fi
+  val forged_name = new SchemaTable("alpha","bad;DROP",arr[key]);
+  if !schema.table_descriptor_source_preview_checked(rt borrow forged_name).is_err() then panic("forged table in descriptor"); fi
+  if !schema.model_source_preview_checked(rt borrow forged_name).is_err() then panic("forged table in class"); fi
+  val forged_kind = new SchemaTable("alpha","physical_alpha",arr[
+    new SchemaColumn("key","key","arbitrary",false)]);
+  if !schema.table_descriptor_source_preview_checked(rt borrow forged_kind).is_err() then panic("forged type in descriptor"); fi
+  if !schema.model_source_preview_checked(rt borrow forged_kind).is_err() then panic("forged type in class"); fi
+  val uuid_r = schema.table_checked("uuid_rows","uuid_rows",arr[
+    schema.column("id","id","uuid",false)]);
+  if uuid_r.is_err() then panic("valid UUID descriptor fixture rejected"); fi
+  val uuid_v = uuid_r.unwrap();
+  if schema.table_descriptor_source_preview_checked(rt borrow uuid_v).is_err() then panic("UUID neutral descriptor rejected"); fi
+  if !schema.model_source_preview_checked(rt borrow uuid_v).is_err() then panic("UUID mapped without nominal codec"); fi
+  val noop = new SchemaPlan(arr[]);
+  val noop_json = schema.review_manifest_preview_checked(rt borrow noop);
+  if noop_json.is_err() then panic("empty review rejected"); fi
+  if noop_json.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == noop_json.unwrap() then panic("empty review status missing"); fi
+  val forged_risk = new SchemaPlan(arr[new SchemaStep("add_nullable_column","alpha","optional","destructive")]);
+  if !schema.review_manifest_preview_checked(rt borrow forged_risk).is_err() then panic("risk upgrade forged into review"); fi
+  val forged_op = new SchemaPlan(arr[new SchemaStep("execute_sql","alpha","key","manual")]);
+  if !schema.review_manifest_preview_checked(rt borrow forged_op).is_err() then panic("executable SQL op forged into review"); fi
+  val forged_scope = new SchemaPlan(arr[new SchemaStep("review_create_table","alpha","key","manual")]);
+  if !schema.review_manifest_preview_checked(rt borrow forged_scope).is_err() then panic("table operation admitted column ID"); fi
+  // Multiple matched stable-ID tables must diff in desired order without
+  // temporary placeholder tables or inferred physical-name matching.
+  val beta_next_r = schema.table_checked("beta","physical_beta",arr[key,opt]);
+  if beta_next_r.is_err() then panic("second matched table fixture rejected"); fi
+  val both_extended_r = schema.catalog_checked(arr[extra_r.unwrap(),beta_next_r.unwrap()]);
+  if both_extended_r.is_err() then panic("two matched table catalog rejected"); fi
+  val both_extended = both_extended_r.unwrap();
+  val both_changes = schema.diff_catalog_checked(rt borrow both_extended,rt borrow ab);
+  if both_changes.is_err() then panic("two matched table diff rejected"); fi
+  if both_changes.unwrap().step_count() != 2 then panic("two matched table diff lost a change"); fi
+  if both_changes.unwrap().step_at(0).unwrap().table_id != "alpha" then panic("first matched table order changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().table_id != "beta" then panic("second matched table order changed"); fi
+  if both_changes.unwrap().step_at(0).unwrap().op != "add_nullable_column" then panic("first matched table operation changed"); fi
+  if both_changes.unwrap().step_at(1).unwrap().risk != "safe" then panic("second matched table risk changed"); fi
+  // Pure Oreslang checked risk diagnostics: cannot grant SQL authority.
+  val safe_plan = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha","optional","safe"),
+    new SchemaStep("drop_not_null","alpha","state","safe")
+  ]);
+  val safe_summary = schema.risk_summary_checked(rt borrow safe_plan);
+  if safe_summary.is_err() then panic("safe risk summary rejected"); fi
+  if safe_summary.unwrap().safe_count != 2 then panic("safe risk count wrong"); fi
+  if safe_summary.unwrap().preflight_count != 0 then panic("safe summary includes preflight"); fi
+  if safe_summary.unwrap().manual_count != 0 then panic("safe summary includes manual"); fi
+  if safe_summary.unwrap().destructive_count != 0 then panic("safe summary includes destructive"); fi
+  if safe_plan.has_blockers() then panic("valid safe step incorrectly marked blocking"); fi
+  val mixed_risks = new SchemaPlan(arr[
+    new SchemaStep("drop_not_null","alpha","key","safe"),
+    new SchemaStep("set_not_null","alpha","state","preflight"),
+    new SchemaStep("review_create_table","beta","","manual"),
+    new SchemaStep("drop_column","alpha","key","destructive")
+  ]);
+  val mixed_summary = schema.risk_summary_checked(rt borrow mixed_risks);
+  if mixed_summary.is_err() then panic("mixed risk summary rejected"); fi
+  if mixed_summary.unwrap().safe_count != 1 then panic("mixed safe count wrong"); fi
+  if mixed_summary.unwrap().preflight_count != 1 then panic("mixed preflight count wrong"); fi
+  if mixed_summary.unwrap().manual_count != 1 then panic("mixed manual count wrong"); fi
+  if mixed_summary.unwrap().destructive_count != 1 then panic("mixed destructive count wrong"); fi
+  if !mixed_risks.has_blockers() then panic("mixed unsafe plan not blocked"); fi
+  val no_risks = schema.risk_summary_checked(rt borrow noop);
+  if no_risks.is_err() then panic("empty risk summary rejected"); fi
+  if no_risks.unwrap().safe_count != 0 then panic("empty risk summary inflated"); fi
+  if no_risks.unwrap().destructive_count != 0 then panic("empty destructive summary inflated"); fi
+  val forged_safe_drop = new SchemaPlan(arr[
+    new SchemaStep("drop_column","alpha","key","safe")
+  ]);
+  if !forged_safe_drop.has_blockers() then panic("forged safe drop marked nonblocking"); fi
+  if !schema.risk_summary_checked(rt borrow forged_safe_drop).is_err() then panic("forged safe drop risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_risk).is_err() then panic("forged risk summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_op).is_err() then panic("arbitrary SQL summary admitted"); fi
+  if !schema.risk_summary_checked(rt borrow forged_scope).is_err() then panic("forged table scope risk summary admitted"); fi
+  val forged_identity = new SchemaPlan(arr[
+    new SchemaStep("add_nullable_column","alpha;DROP","key","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_identity).is_err() then panic("invalid identity risk summary admitted"); fi
+  // Metamorphic risk-summary parity: permuting a valid review plan must
+  // preserve all four risk counts while never authorizing execution.
+  val reordered_risks = new SchemaPlan(arr[
+    new SchemaStep("drop_column","alpha","key","destructive"),
+    new SchemaStep("review_create_table","beta","","manual"),
+    new SchemaStep("set_not_null","alpha","state","preflight"),
+    new SchemaStep("drop_not_null","alpha","key","safe")
+  ]);
+  val reordered_summary = schema.risk_summary_checked(rt borrow reordered_risks);
+  if reordered_summary.is_err() then panic("permuted risk summary rejected"); fi
+  if reordered_summary.unwrap().safe_count != 1 then panic("permuted safe count drift"); fi
+  if reordered_summary.unwrap().preflight_count != 1 then panic("permuted preflight count drift"); fi
+  if reordered_summary.unwrap().manual_count != 1 then panic("permuted manual count drift"); fi
+  if reordered_summary.unwrap().destructive_count != 1 then panic("permuted destructive count drift"); fi
+  if !reordered_risks.has_blockers() then panic("permuted destructive plan not blocked"); fi
+  val reordered_preview = schema.review_manifest_preview_checked(rt borrow reordered_risks);
+  if reordered_preview.is_err() then panic("permuted review manifest rejected"); fi
+  if reordered_preview.unwrap().replace_literal("STOPPED_FOR_EVALUATION","") == reordered_preview.unwrap() then
+    panic("permuted review status disappeared");
+  fi
+  val safe_replay_summary = schema.risk_summary_checked(rt borrow safe_plan);
+  if safe_replay_summary.is_err() then panic("repeat safe summary rejected"); fi
+  if safe_replay_summary.unwrap().safe_count != safe_summary.unwrap().safe_count then
+    panic("repeat risk summary became nondeterministic");
+  fi
+  // Single-step manual and preflight plans must block despite being reviewable.
+  val rename_only = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","alpha","","manual")
+  ]);
+  val rename_summary = schema.risk_summary_checked(rt borrow rename_only);
+  if rename_summary.is_err() then panic("manual rename summary rejected"); fi
+  if rename_summary.unwrap().manual_count != 1 then panic("manual rename risk count wrong"); fi
+  if rename_summary.unwrap().safe_count != 0 then panic("manual rename treated as safe"); fi
+  if !rename_only.has_blockers() then panic("manual rename became nonblocking"); fi
+  val preflight_only = new SchemaPlan(arr[
+    new SchemaStep("set_not_null","alpha","state","preflight")
+  ]);
+  val preflight_summary = schema.risk_summary_checked(rt borrow preflight_only);
+  if preflight_summary.is_err() then panic("preflight summary rejected"); fi
+  if preflight_summary.unwrap().preflight_count != 1 then panic("preflight count wrong"); fi
+  if !preflight_only.has_blockers() then panic("preflight plan became nonblocking"); fi
+  // Untrusted operation/risk combinations must fail even if labels appear safe.
+  val forged_preflight_safe = new SchemaPlan(arr[
+    new SchemaStep("set_not_null","alpha","state","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_preflight_safe).is_err() then
+    panic("forged preflight downgrade admitted");
+  fi
+  val forged_rename_safe = new SchemaPlan(arr[
+    new SchemaStep("review_table_rename","alpha","","safe")
+  ]);
+  if !schema.risk_summary_checked(rt borrow forged_rename_safe).is_err() then
+    panic("forged rename downgrade admitted");
+  fi
+  if !forged_preflight_safe.has_blockers() then panic("forged preflight marked nonblocking"); fi
+  if !forged_rename_safe.has_blockers() then panic("forged rename marked nonblocking"); fi
+  stdio.println("Pure Oreslang schema invariant and metamorphic contracts passed");
+  return;
+}

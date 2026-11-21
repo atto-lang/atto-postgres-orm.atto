@@ -75,7 +75,7 @@ for dependency in "${dependencies[@]}"; do
   printf '%s\t' "$dependency" >> "$evidence/runtime-dependencies.tsv"
   sha256_file "$dependency" | awk '{print $1}' >> "$evidence/runtime-dependencies.tsv"
 done
-for file in SOURCE_REF scripts/ores scripts/verify-native-plans src/pg.ores tests/plans.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
+for file in SOURCE_REF scripts/ores scripts/verify-native-plans tests/verify-native-plans-host.bash src/pg.ores src/schema.ores tests/plans.ores tests/schema-plans.ores tests/schema-adversarial.ores tests/schema-invariants.ores tests/negative/empty_identifier.ores tests/negative/empty_table.ores tests/negative/control_identifier.ores; do
   sha256_file "$root/$file" >> "$evidence/orm-sources.sha256"
 done
 (cd "$compiler" && find target/classes -type f | LC_ALL=C sort | while IFS= read -r file; do
@@ -92,9 +92,14 @@ run_guest() {
   (cd "$root" && ORES_JAVA="$java_bin" ORESLANG_SOURCE_DIR="$compiler" "$root/scripts/ores" "$source") > "$evidence/$label.stdout" 2> "$evidence/$label.stderr"
   rc=$?
   set -e
-  if [[ "$expected" == positive ]]; then
-    printf 'Postgres SQL planning contracts passed\n' > "$evidence/expected-positive.stdout"
-    if [[ "$rc" -eq 0 ]] && cmp -s "$evidence/expected-positive.stdout" "$evidence/$label.stdout"; then outcome=PASS; fi
+  if [[ "$expected" == positive || "$expected" == schema-positive || "$expected" == schema-adversarial-positive || "$expected" == schema-invariants-positive ]]; then
+    case "$expected" in
+      positive) printf 'Postgres SQL planning contracts passed\n' > "$evidence/$label.expected-stdout";;
+      schema-positive) printf 'Pure Oreslang schema-diff planning contracts passed\n' > "$evidence/$label.expected-stdout";;
+      schema-adversarial-positive) printf 'Pure Oreslang adversarial schema contracts passed\n' > "$evidence/$label.expected-stdout";;
+      schema-invariants-positive) printf 'Pure Oreslang schema invariant and metamorphic contracts passed\n' > "$evidence/$label.expected-stdout";;
+    esac
+    if [[ "$rc" -eq 0 ]] && cmp -s "$evidence/$label.expected-stdout" "$evidence/$label.stdout"; then outcome=PASS; fi
   else
     printf "PG_NEGATIVE_%s_STARTED\n" "$(printf "%s" "$label" | tr "[:lower:]-" "[:upper:]_")" > "$evidence/$label.expected-stdout"
     # A launcher failure is never a valid negative guest result.
@@ -106,15 +111,18 @@ run_guest() {
   [[ "$outcome" == PASS ]] || fail "guest oracle failed for $label (exit $rc)"
 }
 run_guest positive tests/plans.ores positive
+run_guest schema-plans tests/schema-plans.ores schema-positive
+run_guest schema-adversarial tests/schema-adversarial.ores schema-adversarial-positive
+run_guest schema-invariants tests/schema-invariants.ores schema-invariants-positive
 run_guest empty-identifier tests/negative/empty_identifier.ores 'invalid PostgreSQL identifier surface'
 run_guest empty-table tests/negative/empty_table.ores 'PostgreSQL table requires at least one column'
 run_guest control-identifier tests/negative/control_identifier.ores 'invalid PostgreSQL identifier surface'
 # A successfully exited script is not proof unless every required fixture ran
 # in order, exactly once, with an explicit PASS recorded for each one.
-required_cases="$(printf '%s\n' positive empty-identifier empty-table control-identifier)"
+required_cases="$(printf '%s\n' positive schema-plans schema-adversarial schema-invariants empty-identifier empty-table control-identifier)"
 actual_cases="$(tail -n +2 "$evidence/outcomes.tsv" | cut -f1)"
 [[ "$actual_cases" == "$required_cases" ]] || fail 'missing, reordered or unexpected native guest cases'
-[[ "$(wc -l < "$evidence/outcomes.tsv")" -eq 5 ]] || fail 'native guest receipt row count mismatch'
+[[ "$(wc -l < "$evidence/outcomes.tsv")" -eq 8 ]] || fail 'native guest receipt row count mismatch'
 [[ "$(tail -n +2 "$evidence/outcomes.tsv" | cut -f3 | sort -u)" == PASS ]] || fail 'native guest receipt contains non-PASS result'
-printf 'VERIFIED: four native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
+printf 'VERIFIED: seven native guest oracle runs executed at ORM head %s with pinned compiler %s\n' "$actual_orm" "$actual_compiler" > "$evidence/RESULT.txt"
 cat "$evidence/RESULT.txt"

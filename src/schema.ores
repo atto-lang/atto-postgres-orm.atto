@@ -1,0 +1,452 @@
+// Runtime-neutral, pure Oreslang structural schema planner (v1).
+// No SQL, database connection, migration execution, or authority bypass.
+// Stable identities must be supplied by a reviewed catalog/DB mapping ledger.
+pub define class SchemaColumn as
+  pub val string stable_id;
+  pub val string name;
+  pub val string kind;
+  pub val bool nullable;
+  pub constructor(string stable_id, string name, string kind, bool nullable) {
+    self.stable_id = stable_id;
+    self.name = name;
+    self.kind = kind;
+    self.nullable = nullable;
+  }
+end
+
+pub define class SchemaTable as
+  pub val string stable_id;
+  pub val string name;
+  val Array<SchemaColumn> saved_columns;
+  pub constructor(string stable_id, string name, Array<SchemaColumn> columns) {
+    self.stable_id = stable_id;
+    self.name = name;
+    let mut Array<SchemaColumn> copy = arr[];
+    for (val column of columns) {
+      copy.add(column);
+    }
+    self.saved_columns = copy;
+  }
+  pub columns(): Array<SchemaColumn> {
+    let mut Array<SchemaColumn> copy = arr[];
+    for (val column of self.saved_columns) {
+      copy.add(column);
+    }
+    return copy;
+  }
+end
+
+// Pure, bounded snapshot of whole-catalog identities. The public constructor
+// is not evidence of contract parity or database authority.
+pub define class SchemaCatalog as
+  val Array<SchemaTable> saved_tables;
+  pub constructor(Array<SchemaTable> tables) {
+    let mut Array<SchemaTable> copy = arr[];
+    for (val table of tables) { copy.add(table); }
+    self.saved_tables = copy;
+  }
+  pub tables(): Array<SchemaTable> {
+    let mut Array<SchemaTable> copy = arr[];
+    for (val table of self.saved_tables) { copy.add(table); }
+    return copy;
+  }
+end
+
+// risk: safe, preflight, manual, destructive. These are planning labels,
+// NOT authorization to apply SQL. Every proposed step requires review.
+pub define class SchemaStep as
+  pub val string op;
+  pub val string table_id;
+  pub val string column_id;
+  pub val string risk;
+  pub constructor(string op, string table_id, string column_id, string risk) {
+    self.op = op;
+    self.table_id = table_id;
+    self.column_id = column_id;
+    self.risk = risk;
+  }
+end
+
+pub define class SchemaPlan as
+  val Array<SchemaStep> saved_steps;
+  pub constructor(Array<SchemaStep> steps) {
+    let mut Array<SchemaStep> copy = arr[];
+    for (val step of steps) { copy.add(step); }
+    self.saved_steps = copy;
+  }
+  pub step_count(): int { return self.saved_steps.size; }
+  pub steps(): Array<SchemaStep> {
+    let mut Array<SchemaStep> copy = arr[];
+    for (val step of self.saved_steps) { copy.add(step); }
+    return copy;
+  }
+  pub step_at(int index): Result<SchemaStep, string> {
+    if index < 0 || index >= self.saved_steps.size then
+      return Err("schema step index out of bounds");
+    fi
+    return Ok(self.saved_steps.get(index));
+  }
+  // Advisory only. Public steps are untrusted: unknown or mismatched
+  // operation/risk pairs MUST be treated as blockers, never as safe DDL.
+  // Even a false result does not authorize applying a migration.
+  pub has_blockers(): bool {
+    for (val step of self.saved_steps) {
+      if step.risk != "safe" then return true; fi
+      if step.op != "add_nullable_column" && step.op != "drop_not_null" then
+        return true;
+      fi
+    }
+    return false;
+  }
+end
+
+// Immutable data-only risk counts; not an approval token or SQL capability.
+pub define class SchemaRiskSummary as
+  pub val int safe_count;
+  pub val int preflight_count;
+  pub val int manual_count;
+  pub val int destructive_count;
+  pub constructor(int safe_count, int preflight_count, int manual_count, int destructive_count) {
+    self.safe_count = safe_count;
+    self.preflight_count = preflight_count;
+    self.manual_count = manual_count;
+    self.destructive_count = destructive_count;
+  }
+end
+
+define module schema as
+  // Portable, explicit ASCII identifier policy independent of SQL dialect.
+  // The 63-byte limit makes v1 identities lossless for PostgreSQL, but the
+  // IR itself is not tied to a PostgreSQL connection or SQL renderer.
+  pub fnc admitted_name(string name): bool {
+    if !name.is_identifier() then return false; fi
+    if name.replace_literal("|", "") != name then return false; fi
+    let string mapped = name;
+    for (val letter of arr["a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "_"]) {
+      mapped = mapped.replace_literal(letter, "|");
+    }
+    if mapped.replace_literal("|", "") != "" then return false; fi
+    return mapped.split_literal("|").size <= 64;
+  }
+
+  pub fnc admitted_kind(string kind): bool {
+    return kind == "uuid" || kind == "string" || kind == "int32"
+      || kind == "int64" || kind == "boolean" || kind == "json"
+      || kind == "timestamp" || kind == "bytes";
+  }
+
+  pub fnc column(string stable_id, string name, string kind, bool nullable): SchemaColumn {
+    return new SchemaColumn(stable_id, name, kind, nullable);
+  }
+
+  // Check all fields even on publicly constructed SchemaColumn instances.
+  // This is the pure structural admission boundary, not a SQL safety gate.
+  pub fnc table_checked(string stable_id, string name, Array<SchemaColumn> columns): Result<SchemaTable, string> {
+    if !admitted_name(stable_id) || !admitted_name(name) then
+      return Err("unadmitted schema table identity");
+    fi
+    if columns.size == 0 || columns.size > 64 then
+      return Err("schema table requires 1 to 64 columns");
+    fi
+    for (val column_def of columns) {
+      if !admitted_name(column_def.stable_id) || !admitted_name(column_def.name) then
+        return Err("unadmitted schema column identity");
+      fi
+      if !admitted_kind(column_def.kind) then
+        return Err("unadmitted schema column kind");
+      fi
+      let bool seen_id = false;
+      let bool seen_name = false;
+      for (val other of columns) {
+        if other.stable_id == column_def.stable_id then
+          if seen_id then return Err("duplicate schema column stable id"); fi
+          seen_id = true;
+        fi
+        if other.name == column_def.name then
+          if seen_name then return Err("duplicate schema column name"); fi
+          seen_name = true;
+        fi
+      }
+    }
+    return Ok(new SchemaTable(stable_id, name, columns));
+  }
+
+  // desired = independently reconciled declared catalog;
+  // actual = introspected DB catalog with reviewed stable-id assignments.
+  // Never infer a rename from coincidental names or silently produce SQL.
+  pub fnc diff_checked(borrow SchemaTable desired, borrow SchemaTable actual): Result<SchemaPlan, string> {
+    val desired_check = table_checked(desired.stable_id, desired.name, desired.columns());
+    val actual_check = table_checked(actual.stable_id, actual.name, actual.columns());
+    if desired_check.is_err() || actual_check.is_err() then
+      return Err("invalid schema table at diff trust boundary");
+    fi
+    if desired.stable_id != actual.stable_id then
+      return Err("schema table stable identity mismatch");
+    fi
+    let mut Array<SchemaStep> steps = arr[];
+    if desired.name != actual.name then
+      steps.add(new SchemaStep("review_table_rename", desired.stable_id, "", "manual"));
+    fi
+
+    val desired_columns = desired.columns();
+    val actual_columns = actual.columns();
+    for (val wanted of desired_columns) {
+      let bool matched = false;
+      for (val existing of actual_columns) {
+        if wanted.stable_id == existing.stable_id then
+          matched = true;
+          if wanted.name != existing.name then
+            steps.add(new SchemaStep("review_column_rename", desired.stable_id, wanted.stable_id, "manual"));
+          fi
+          if wanted.kind != existing.kind then
+            steps.add(new SchemaStep("review_type_change", desired.stable_id, wanted.stable_id, "manual"));
+          fi
+          if wanted.nullable != existing.nullable then
+            if wanted.nullable then
+              steps.add(new SchemaStep("drop_not_null", desired.stable_id, wanted.stable_id, "safe"));
+            else
+              steps.add(new SchemaStep("set_not_null", desired.stable_id, wanted.stable_id, "preflight"));
+            fi
+          fi
+        else
+          if wanted.name == existing.name then
+            return Err("schema column name mapped to a different stable identity");
+          fi
+        fi
+      }
+      if !matched then
+        if wanted.nullable then
+          steps.add(new SchemaStep("add_nullable_column", desired.stable_id, wanted.stable_id, "safe"));
+        else
+          steps.add(new SchemaStep("add_required_column", desired.stable_id, wanted.stable_id, "preflight"));
+        fi
+      fi
+    }
+    for (val existing of actual_columns) {
+      let bool found = false;
+      for (val wanted of desired_columns) {
+        if existing.stable_id == wanted.stable_id then found = true; fi
+      }
+      if !found then
+        steps.add(new SchemaStep("drop_column", desired.stable_id, existing.stable_id, "destructive"));
+      fi
+    }
+    return Ok(new SchemaPlan(steps));
+  }
+
+
+  // Compare complete tables only by their reviewed stable IDs. Physical
+  // names are collision checks, not rename inference. Never generate SQL.
+  pub fnc catalog_checked(Array<SchemaTable> tables): Result<SchemaCatalog, string> {
+    if tables.size > 256 then return Err("too many portable catalog tables"); fi
+    let mut Array<SchemaTable> seen = arr[];
+    for (val table of tables) {
+      if table_checked(table.stable_id, table.name, table.columns()).is_err() then
+        return Err("unadmitted table in portable catalog");
+      fi
+      for (val prior of seen) {
+        if prior.stable_id == table.stable_id then
+          return Err("duplicate catalog table stable identity");
+        fi
+        if prior.name == table.name then
+          return Err("duplicate catalog physical table name");
+        fi
+      }
+      seen.add(table);
+    }
+    return Ok(new SchemaCatalog(tables));
+  }
+
+  pub fnc diff_catalog_checked(borrow SchemaCatalog desired, borrow SchemaCatalog actual): Result<SchemaPlan, string> {
+    val desired_tables = desired.tables();
+    val actual_tables = actual.tables();
+    if catalog_checked(desired_tables).is_err() || catalog_checked(actual_tables).is_err() then
+      return Err("invalid catalog at diff trust boundary");
+    fi
+    let mut Array<SchemaStep> steps = arr[];
+    for (val wanted of desired_tables) {
+      let bool matched = false;
+      for (val existing of actual_tables) {
+        if existing.stable_id == wanted.stable_id then
+          matched = true;
+          // No disposable placeholder object or shared mutable match slot:
+          // diff directly from the validated, actor-local snapshot.
+          val inner = diff_checked(rt borrow wanted, rt borrow existing);
+          if inner.is_err() then return Err("table diff failed at catalog trust boundary"); fi
+          for (val change of inner.unwrap().steps()) { steps.add(change); }
+        else
+          if existing.name == wanted.name then
+            return Err("physical table name conflicts with stable identity");
+          fi
+        fi
+      }
+      if !matched then
+        // Missing constraints, policies and role grants force human review.
+        steps.add(new SchemaStep("review_create_table", wanted.stable_id, "", "manual"));
+      fi
+    }
+    for (val old_table of actual_tables) {
+      let bool found = false;
+      for (val wanted of desired_tables) {
+        if old_table.stable_id == wanted.stable_id then found = true; fi
+      }
+      if !found then
+        steps.add(new SchemaStep("review_drop_table", old_table.stable_id, "", "destructive"));
+      fi
+    }
+    return Ok(new SchemaPlan(steps));
+  }
+
+
+  // A stable-ID *review* manifest, not a DPM plan and never a DDL capability.
+  // Public SchemaPlan/SchemaStep constructors are not authority: verify every
+  // op, risk and ID before any JSON is assembled. Strict ASCII identities
+  // cannot inject JSON syntax. The output always denies approval.
+  pub fnc review_manifest_preview_checked(borrow SchemaPlan plan): Result<string, string> {
+    val all_steps = plan.steps();
+    if all_steps.size > 2048 then return Err("too many review steps"); fi
+    let string output = "{\"schema\":\"ores.orm.plan-preview/v1\","
+      + "\"status\":\"STOPPED_FOR_EVALUATION\",\"approved\":false,"
+      + "\"scope\":\"column_shapes_only\",\"steps\":[";
+    let bool first = true;
+    for (val step of all_steps) {
+      if !admitted_name(step.table_id) then
+        return Err("unadmitted review table stable ID");
+      fi
+      let bool table_op = false;
+      let string allowed_risk = "";
+      if step.op == "review_table_rename" then
+        table_op = true;
+        allowed_risk = "manual";
+      fi
+      if step.op == "review_create_table" then
+        table_op = true;
+        allowed_risk = "manual";
+      fi
+      if step.op == "review_drop_table" then
+        table_op = true;
+        allowed_risk = "destructive";
+      fi
+      if step.op == "review_column_rename" || step.op == "review_type_change" then
+        allowed_risk = "manual";
+      fi
+      if step.op == "drop_not_null" || step.op == "add_nullable_column" then
+        allowed_risk = "safe";
+      fi
+      if step.op == "set_not_null" || step.op == "add_required_column" then
+        allowed_risk = "preflight";
+      fi
+      if step.op == "drop_column" then
+        allowed_risk = "destructive";
+      fi
+      if allowed_risk == "" || step.risk != allowed_risk then
+        return Err("forged or inconsistent schema review operation");
+      fi
+      if table_op then
+        if step.column_id != "" then
+          return Err("table review operation supplied a column identity");
+        fi
+      else
+        if !admitted_name(step.column_id) then
+          return Err("unadmitted review column stable ID");
+        fi
+      fi
+      if !first then output = output + ","; fi
+      first = false;
+      output = output + "{\"op\":\"" + step.op + "\",\"table_id\":\""
+        + step.table_id + "\",\"column_id\":\"" + step.column_id
+        + "\",\"risk\":\"" + step.risk + "\"}";
+    }
+    output = output + "]}";
+    return Ok(output);
+  }
+
+  // Portable, bounded, data-only diagnostics. Reuse the strict review
+  // manifest trust boundary to prevent forged op/risk or risk downgrades.
+  // Counts never authorize SQL or migrations.
+  pub fnc risk_summary_checked(borrow SchemaPlan plan): Result<SchemaRiskSummary, string> {
+    val validated = review_manifest_preview_checked(rt borrow plan);
+    if validated.is_err() then
+      return Err("unadmitted schema risk summary");
+    fi
+    let int safe_count = 0;
+    let int preflight_count = 0;
+    let int manual_count = 0;
+    let int destructive_count = 0;
+    for (val step of plan.steps()) {
+      if step.risk == "safe" then safe_count = safe_count + 1; fi
+      if step.risk == "preflight" then preflight_count = preflight_count + 1; fi
+      if step.risk == "manual" then manual_count = manual_count + 1; fi
+      if step.risk == "destructive" then destructive_count = destructive_count + 1; fi
+    }
+    return Ok(new SchemaRiskSummary(safe_count, preflight_count, manual_count, destructive_count));
+  }
+
+  // Source-code generation is a preview only, not authority admission.
+  // Consumers MUST independently verify the TypeSpec/JSON Schema parity
+  // receipt, accepted catalog overlay and actual Oreslang compilation.
+  // Stable IDs, not SQL display names, determine generated field identities.
+  pub fnc table_descriptor_source_preview_checked(borrow SchemaTable table): Result<string, string> {
+    if table_checked(table.stable_id, table.name, table.columns()).is_err() then
+      return Err("unadmitted table for source preview");
+    fi
+    let string source = "schema.table_checked(\"" + table.stable_id + "\", \""
+      + table.name + "\", arr[";
+    let bool first = true;
+    for (val column of table.columns()) {
+      if !first then source = source + ", "; fi
+      first = false;
+      let string nullable_literal = "false";
+      if column.nullable then nullable_literal = "true"; fi
+      source = source + "schema.column(\"" + column.stable_id + "\", \""
+        + column.name + "\", \"" + column.kind + "\", " + nullable_literal + ")";
+    }
+    source = source + "])";
+    return Ok(source);
+  }
+
+  // Narrow but *nominal* Oreslang row-class preview. Only nonnullable
+  // string/boolean columns are currently lowered. UUID, JSON, integer,
+  // timestamp, bytes and nullable values need reviewed nominal/Option<T>
+  // representations and codecs; never quietly erase their distinctions.
+  // The return is plain source TEXT and confers no trusted codegen receipt.
+  pub fnc model_source_preview_checked(borrow SchemaTable table): Result<string, string> {
+    if table_checked(table.stable_id, table.name, table.columns()).is_err() then
+      return Err("unadmitted table for nominal model preview");
+    fi
+    val model_name = "orm_" + table.stable_id;
+    if !admitted_name(model_name) then
+      return Err("generated model identity exceeds portable identifier boundary");
+    fi
+    let string declarations = "";
+    let string parameters = "";
+    let string assignments = "";
+    let bool first = true;
+    for (val column of table.columns()) {
+      if column.nullable then
+        return Err("nullable generated model requires reviewed Option type mapping");
+      fi
+      let string native_type = "";
+      if column.kind == "string" then native_type = "string"; fi
+      if column.kind == "boolean" then native_type = "bool"; fi
+      if native_type == "" then
+        return Err("nominal guest type or codec mapping not implemented");
+      fi
+      val member = "field_" + column.stable_id;
+      if !admitted_name(member) then
+        return Err("generated member identity exceeds portable identifier boundary");
+      fi
+      if !first then parameters = parameters + ", "; fi
+      first = false;
+      declarations = declarations + "  pub val " + native_type + " " + member + ";\n";
+      parameters = parameters + native_type + " " + member;
+      assignments = assignments + "    self." + member + " = " + member + ";\n";
+    }
+    val output = "// ORESLANG_MODEL_PREVIEW_ONLY_NOT_AUTHORIZED\n"
+      + "pub define class " + model_name + " as\n"
+      + declarations
+      + "  pub constructor(" + parameters + ") {\n"
+      + assignments + "  }\nend\n";
+    return Ok(output);
+  }
+end
