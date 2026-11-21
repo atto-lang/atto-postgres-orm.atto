@@ -1,0 +1,119 @@
+import module orm_schema from '../src/orm_schema';
+
+pub routine main(): void {
+  val idcol = orm_schema.column("id","uuid",false);
+  val title = orm_schema.column("title","string",false);
+  val note = orm_schema.column("note","string",true);
+  val current_table = orm_schema.table_checked("docs",arr[idcol,title]);
+  if current_table.is_err() then panic("valid current schema rejected"); fi
+  val target_table = orm_schema.table_checked("docs",arr[idcol,title,note]);
+  if target_table.is_err() then panic("valid desired schema rejected"); fi
+  val observed = orm_schema.catalog_checked("observed",arr[current_table.unwrap()]);
+  val desired = orm_schema.catalog_checked("desired",arr[target_table.unwrap()]);
+  if observed.is_err() || desired.is_err() then panic("valid catalog rejected"); fi
+  val proposal = orm_schema.diff_checked(desired.unwrap(),observed.unwrap());
+  if proposal.is_err() then panic("add-nullable diff rejected"); fi
+  if proposal.unwrap().decision != "review_required" then panic("nullable diff not review-gated"); fi
+  if proposal.unwrap().scope != "column_shapes_only" then panic("column-only scope was hidden"); fi
+  if proposal.unwrap().change_count() != 1 then panic("nullable diff cardinality mismatch"); fi
+  if proposal.unwrap().change_at(0).unwrap().kind != "propose_add_nullable_column" then
+    panic("nullable change misclassified");
+  fi
+  if !proposal.unwrap().change_at(-1).is_err() then panic("negative change index admitted"); fi
+  val same = orm_schema.diff_checked(observed.unwrap(),observed.unwrap());
+  if same.is_err() then panic("same-catalog diff rejected"); fi
+  if same.unwrap().decision != "column_shapes_equal_only" then
+    panic("column equality incorrectly claimed whole catalog parity");
+  fi
+  if same.unwrap().change_count() != 0 then panic("equal column shapes emitted changes"); fi
+  val required = orm_schema.table_checked("docs",arr[idcol,title,
+    orm_schema.column("required_extra","string",false)]);
+  if required.is_err() then panic("required-field fixture rejected"); fi
+  val required_catalog = orm_schema.catalog_checked("required",arr[required.unwrap()]);
+  if required_catalog.is_err() then panic("required catalog rejected"); fi
+  val required_diff = orm_schema.diff_checked(required_catalog.unwrap(),observed.unwrap());
+  if required_diff.is_err() then panic("required diff failed before classification"); fi
+  if required_diff.unwrap().decision != "stop_for_evaluation" then
+    panic("nonnullable addition escaped backfill gate");
+  fi
+  if required_diff.unwrap().change_at(0).unwrap().kind != "block_add_required_column" then
+    panic("nonnullable change misclassified");
+  fi
+  val dropped = orm_schema.diff_checked(observed.unwrap(),desired.unwrap());
+  if dropped.is_err() then panic("drop diff rejected before safety check"); fi
+  if dropped.unwrap().decision != "stop_for_evaluation" then panic("column drop admitted"); fi
+  if dropped.unwrap().change_at(0).unwrap().kind != "block_drop_or_rename_column" then
+    panic("column deletion assumed safe rename");
+  fi
+  val changed_kind = orm_schema.table_checked("docs",arr[idcol,
+    orm_schema.column("title","json",false)]);
+  if changed_kind.is_err() then panic("typed drift fixture rejected"); fi
+  val changed_catalog = orm_schema.catalog_checked("changed",arr[changed_kind.unwrap()]);
+  if changed_catalog.is_err() then panic("typed drift catalog rejected"); fi
+  val type_diff = orm_schema.diff_checked(changed_catalog.unwrap(),observed.unwrap());
+  if type_diff.is_err() then panic("typed drift diff rejected"); fi
+  if type_diff.unwrap().decision != "stop_for_evaluation" then panic("type cast inferred safe"); fi
+  if type_diff.unwrap().change_at(0).unwrap().kind != "block_type_change" then
+    panic("type change classified incorrectly");
+  fi
+  val changed_nullable = orm_schema.table_checked("docs",arr[idcol,
+    orm_schema.column("title","string",true)]);
+  if changed_nullable.is_err() then panic("nullable drift fixture rejected"); fi
+  val null_catalog = orm_schema.catalog_checked("nullable",arr[changed_nullable.unwrap()]);
+  if null_catalog.is_err() then panic("nullable drift catalog rejected"); fi
+  val null_diff = orm_schema.diff_checked(null_catalog.unwrap(),observed.unwrap());
+  if null_diff.is_err() then panic("nullable drift diff rejected"); fi
+  if null_diff.unwrap().decision != "stop_for_evaluation" then
+    panic("nullability change auto-approved");
+  fi
+  if !orm_schema.table_checked("docs",arr[
+    orm_schema.column("id","uuid",false),
+    orm_schema.column("id","uuid",false)
+  ]).is_err() then panic("duplicate fields admitted"); fi
+  if !orm_schema.table_checked("bad;drop",arr[idcol]).is_err() then
+    panic("SQL-injected table name admitted");
+  fi
+  if !orm_schema.table_checked("docs",arr[
+    orm_schema.column("full_nameé","string",false)
+  ]).is_err() then panic("unicode field name admitted"); fi
+  if !orm_schema.table_checked("docs",arr[
+    orm_schema.column("myfield","unknown",false)
+  ]).is_err() then panic("unknown neutral kind admitted"); fi
+  val table_b = orm_schema.table_checked("events",arr[idcol]);
+  if table_b.is_err() then panic("second table fixture rejected"); fi
+  if !orm_schema.catalog_checked("duplicate",arr[
+    current_table.unwrap(),current_table.unwrap()
+  ]).is_err() then panic("duplicate neutral tables admitted"); fi
+  val current_more = orm_schema.catalog_checked("extra",arr[current_table.unwrap(),table_b.unwrap()]);
+  if current_more.is_err() then panic("extra table catalog rejected"); fi
+  val table_drop = orm_schema.diff_checked(observed.unwrap(),current_more.unwrap());
+  if table_drop.is_err() then panic("table removal diff rejected"); fi
+  if table_drop.unwrap().decision != "stop_for_evaluation" then
+    panic("table drop did not stop for evaluation");
+  fi
+  if table_drop.unwrap().change_at(0).unwrap().kind != "block_drop_or_rename_table" then
+    panic("table drop assumed safe");
+  fi
+  val only_new = orm_schema.catalog_checked("fresh",arr[table_b.unwrap()]);
+  val empty = orm_schema.catalog_checked("empty",arr[]);
+  if only_new.is_err() || empty.is_err() then panic("new-table fixtures rejected"); fi
+  val creation = orm_schema.diff_checked(only_new.unwrap(),empty.unwrap());
+  if creation.is_err() then panic("table create diff rejected"); fi
+  if creation.unwrap().decision != "review_required" then panic("table creation auto-approved"); fi
+  if creation.unwrap().change_at(0).unwrap().kind != "propose_create_table" then
+    panic("table create change misclassified");
+  fi
+  // Caller array mutation after construction cannot retroactively alter
+  // the saved catalog snapshot used for migration comparison.
+  let Array<OrmColumn> mutable_columns = arr[idcol,title];
+  val saved_table = orm_schema.table_checked("docs",mutable_columns);
+  if saved_table.is_err() then panic("snapshot fixture rejected"); fi
+  mutable_columns.add(note);
+  if saved_table.unwrap().columns().size != 2 then panic("input alias mutated saved table"); fi
+  let Array<OrmTable> mutable_tables = arr[saved_table.unwrap()];
+  val saved_catalog = orm_schema.catalog_checked("saved",mutable_tables);
+  if saved_catalog.is_err() then panic("saved catalog fixture rejected"); fi
+  mutable_tables.add(table_b.unwrap());
+  if saved_catalog.unwrap().tables().size != 1 then panic("input alias mutated saved catalog"); fi
+  stdio.println("Oreslang neutral column-schema diff contracts passed");
+}

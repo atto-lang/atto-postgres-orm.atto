@@ -1,0 +1,30 @@
+{
+  "schema": "ores.orm.peer-authority-policy/v1",
+  "precedence": "none",
+  "authorities": [
+    {
+      "id": "typespec",
+      "path": "contracts/typespec/document.tsp",
+      "origin": "independently_human_authored"
+    },
+    {
+      "id": "json-schema",
+      "path": "contracts/json-schema/document-row.schema.json",
+      "origin": "independently_human_authored"
+    }
+  ],
+  "generatedJsonSchemaUse": "diagnostic_comparison_only",
+  "parityGate": {
+    "checker": "oresoftware/typespec-json-schema-validator",
+    "fullCompilerAndDifferentialValidationRequired": true,
+    "contractIrRole": "downstream_only_not_authority",
+    "currentStatus": "not_executed",
+    "unverifiedDecision": "STOPPED_FOR_EVALUATION"
+  },
+  "database": {
+    "overlay": "contracts/storage/document.storage.v1.json",
+    "migrationPlannerAndApplier": "declarative-migrations/declarative-postgres-migrate.rs",
+    "ormMayGenerateReviewProposalOnly": true,
+    "productionApplyRequiresLeaseReadbackAndHumanReview": true
+  }
+}

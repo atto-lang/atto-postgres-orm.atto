@@ -5,6 +5,8 @@ on:
       - 'src/pg.ores'
       - 'tests/plans.ores'
       - 'tests/pg17-ddl-contract.bash'
+      - 'tests/verify-pg17-dml-host.bash'
+      - 'tests/pg17-dml-contract.bash'
       - 'tests/verify-pg17-ddl-host.bash'
       - '.github/workflows/pg17-ddl-integration.yml'
   workflow_dispatch:
@@ -47,4 +49,14 @@ jobs:
           set -euo pipefail
           bash -n tests/pg17-ddl-contract.bash
           bash tests/pg17-ddl-contract.bash
+      - name: SQL-only prepared DML and transaction rollback
+        shell: bash
+        env:
+          PG_TEST_DISPOSABLE: I_ACKNOWLEDGE_DISPOSABLE_DATABASE
+          PG_TEST_DSN: postgresql://orm_contract:local_ci_test_only@localhost:5432/orm_contract
+        run: |
+          set -euo pipefail
+          bash -n tests/pg17-dml-contract.bash
+          bash tests/pg17-dml-contract.bash
+          printf '%s\n' 'SQL_ONLY_DML_COMPLETE: No native ORM, authenticated RLS, or runtime driver'
           printf '%s\n' 'SQL_ONLY_DB_GATE_COMPLETE: Does not compile Oreslang or verify RLS/driver/backend parity'

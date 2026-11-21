@@ -1,0 +1,29 @@
+name: Oreslang schema authority source fixtures (HOST ONLY)
+on:
+  pull_request:
+    paths:
+      - 'src/orm_schema.ores'
+      - 'tests/schema_diff.ores'
+      - 'tests/verify-schema-authority-host.cjs'
+      - 'contracts/**'
+      - 'docs/SCHEMA_FIRST_MIGRATIONS.md'
+      - '.github/workflows/orm-schema-authority-host.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-only-authority-smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Host-only schema fixtures and fail-closed mutations
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --version
+          node --check tests/verify-schema-authority-host.cjs
+          node tests/verify-schema-authority-host.cjs
+          printf '%s\n' 'NO_TYPESPEC_COMPILER_NO_ORESLANG_GUEST_NO_DPM_OR_DB'

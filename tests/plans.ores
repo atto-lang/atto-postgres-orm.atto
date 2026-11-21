@@ -95,6 +95,28 @@ pub routine main(): void {
   if !pg.find_in_workspace_plan_checked("runsé", "tenant-a", "record-1").is_err() then
     panic("Unicode query table identifier admitted");
   fi
+  // Non-ASCII identifiers must fail even if a backend's is_identifier accepts
+  // Unicode letters, marks, joiners or width-variant confusables.
+  for (val non_ascii of arr["é", "élan", "aé", "éa", "a\u0301", "\uFF41", "a\u200d", "a\u00a0", "a\u03bf"]) {
+    if pg.admitted_identifier(non_ascii) then panic("unmapped Unicode admitted"); fi
+    if !pg.table_typed_pk(non_ascii, arr[
+      pg.column_spec("id", "uuid", false)
+    ], arr["id"]).is_err() then panic("Unicode typed table admitted"); fi
+    if !pg.find_in_workspace_plan_checked(non_ascii, "w", "i").is_err() then
+      panic("Unicode checked plan table admitted"); fi
+    if !pg.find_in_workspace_checked(non_ascii, "w", "i").is_err() then
+      panic("Unicode checked legacy table admitted"); fi
+  }
+  if pg.admitted_identifier("ab|cd") then panic("ASCII count sentinel admitted"); fi
+  if !pg.table_typed_pk("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("aé", "text", false)
+  ], arr["id"]).is_err() then panic("Unicode typed column admitted"); fi
+  if !pg.table_typed_pk_constraints("docs", arr[
+    pg.column_spec("id", "uuid", false)
+  ], arr["id"], arr[
+    pg.constraint_foreign_key(arr["id"], "w\u03bfrkspaces", arr["id"])
+  ]).is_err() then panic("Unicode FK target admitted"); fi
   if pg.admitted_identifier("\u0000") then panic("NUL identifier admitted"); fi
   if pg.admitted_identifier("line\nbreak") then panic("LF identifier admitted"); fi
   if pg.admitted_identifier("line\rbreak") then panic("CR identifier admitted"); fi
@@ -262,6 +284,392 @@ pub routine main(): void {
   if owned_snapshot.param_at(1).unwrap() != "record-1" then
     panic("QueryPlan record parameter aliased source array");
   fi
+  // PgType and DbValue use a closed first-slice codec set. No driver exists.
+  if pg.pg_type_checked("uuid").unwrap().name != "uuid" then
+    panic("typed PostgreSQL type descriptor");
+  fi
+  if !pg.pg_type_checked("text); DROP TABLE docs; --").is_err() then
+    panic("raw SQL type admitted into PgType");
+  fi
+  val uuid_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  val uuid_b = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+  if !pg.canonical_uuid(uuid_a) then panic("valid canonical UUID rejected"); fi
+  if !pg.canonical_uuid("abc") then panic("short UUID admitted"); fi
+  if !pg.canonical_uuid("gggggggg-aaaa-aaaa-aaaa-aaaaaaaaaaaa") then
+    panic("nonhex UUID admitted");
+  fi
+  if !pg.canonical_uuid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaé") then
+    panic("Unicode UUID admitted");
+  fi
+  if !pg.db_uuid_checked("bad").is_err() then panic("string to UUID coerced"); fi
+  if !pg.db_null_checked("text;--").is_err() then panic("raw NULL type admitted"); fi
+  if !pg.admitted_db_value(pg.db_boolean(true)) then panic("boolean codec rejected"); fi
+  if !pg.db_value_checked("boolean", "maybe", false).is_err() then
+    panic("noncanonical boolean admitted");
+  fi
+  if !pg.db_value_checked("uuid", "bad", false).is_err() then
+    panic("noncanonical UUID bind admitted");
+  fi
+  val note_field = pg.column_spec("note", "text", true);
+  val required_field = pg.column_spec("title", "text", false);
+  val typed_write = pg.plan_update_field_checked("docs", required_field,
+    pg.change_set(pg.db_text("new' OR true--")), uuid_a, uuid_b);
+  if typed_write.is_err() then panic("typed patch rejected safe bind"); fi
+  if typed_write.unwrap().is_noop then panic("set patch marked no-op"); fi
+  if typed_write.unwrap().sql !=
+    "UPDATE \"docs\" SET \"title\" = $1::text WHERE workspace_id = $2::uuid AND id = $3::uuid" then
+    panic("typed patch SQL changed");
+  fi
+  if typed_write.unwrap().param_count() != 3 then panic("typed patch arity"); fi
+  if typed_write.unwrap().param_at(0).unwrap().text_value != "new' OR true--" then
+    panic("SQL payload interpolated instead of bound");
+  fi
+  if typed_write.unwrap().param_at(1).unwrap().kind != "uuid" then
+    panic("workspace bind missing UUID tag");
+  fi
+  if !typed_write.unwrap().param_at(-1).is_err() then
+    panic("negative patch bind offset admitted");
+  fi
+  if !typed_write.unwrap().param_at(3).is_err() then
+    panic("oversized patch bind offset admitted");
+  fi
+  // NotSet is omission, never a carrier for hidden data or SQL NULL.
+  if !pg.admitted_field_change(pg.change_not_set()) then
+    panic("canonical NotSet sentinel was rejected");
+  fi
+  if !pg.change_checked("not_set", pg.db_boolean(false)).is_err() then
+    panic("NotSet admitted a hidden boolean payload");
+  fi
+  if !pg.change_checked("not_set", pg.db_text("hidden")).is_err() then
+    panic("NotSet admitted a hidden text payload");
+  fi
+  if !pg.change_checked("not_set", pg.db_null_checked("text").unwrap()).is_err() then
+    panic("NotSet silently conflated NULL with omission");
+  fi
+  if pg.change_checked("set", pg.db_text("ok")).is_err() then
+    panic("valid Set payload rejected");
+  fi
+  if pg.change_checked("unchanged", pg.db_boolean(true)).is_err() then
+    panic("valid Unchanged payload rejected");
+  fi
+  val omitted = pg.plan_update_field_checked("docs", note_field,
+    pg.change_not_set(), uuid_a, uuid_b);
+  if omitted.is_err() then panic("NotSet planner returned error"); fi
+  if !omitted.unwrap().is_noop || omitted.unwrap().param_count() != 0 then
+    panic("NotSet must not write or bind");
+  fi
+  val unchanged = pg.plan_update_field_checked("docs", required_field,
+    pg.change_unchanged(pg.db_text("old")), uuid_a, uuid_b);
+  if unchanged.is_err() then panic("Unchanged planner returned error"); fi
+  if !unchanged.unwrap().is_noop then panic("Unchanged must not write"); fi
+  val explicit_null = pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_null_checked("text").unwrap()), uuid_a, uuid_b);
+  if explicit_null.is_err() then panic("nullable SQL NULL planner returned error"); fi
+  if explicit_null.unwrap().is_noop then panic("nullable SQL NULL rejected"); fi
+  if !explicit_null.unwrap().param_at(0).unwrap().is_null then
+    panic("SQL NULL lost its explicit tag");
+  fi
+  if !pg.plan_update_field_checked("docs", required_field,
+    pg.change_set(pg.db_null_checked("text").unwrap()), uuid_a, uuid_b).is_err() then
+    panic("nonnullable SQL NULL admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("id", "uuid", false),
+    pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()), uuid_a, uuid_b).is_err() then
+    panic("primary key patch admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("workspace_id", "uuid", false),
+    pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()), uuid_a, uuid_b).is_err() then
+    panic("tenant key patch admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_boolean(false)), uuid_a, uuid_b).is_err() then
+    panic("mismatched patch type admitted");
+  fi
+  if !pg.change_checked("wrong", pg.db_text("x")).is_err() then
+    panic("invalid patch change state admitted");
+  fi
+  if !pg.plan_update_field_checked("docs; DELETE", note_field,
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("injected patch table admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", pg.column_spec("note; DELETE", "text", true),
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("injected patch column admitted");
+  fi
+  if !pg.plan_update_field_checked("docs", note_field,
+    pg.change_set(pg.db_text("x")), "not-a-uuid", uuid_b).is_err() then
+    panic("unvalidated tenant UUID admitted");
+  fi
+  // Table descriptors snapshot columns on creation and on read.
+  let Array<ColumnSpec> schema_columns = arr[
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("title", "text", false),
+    pg.column_spec("note", "text", true)
+  ];
+  val schema_result = pg.table_descriptor_checked("docs", schema_columns);
+  if schema_result.is_err() then panic("admitted table descriptor rejected"); fi
+  if schema_result.unwrap().column_count() != 4 then
+    panic("schema column count mismatch");
+  fi
+  schema_columns.set(3, pg.column_spec("tampered", "text", false));
+  val returned_columns = schema_result.unwrap().columns();
+  returned_columns.set(3, pg.column_spec("another_tamper", "text", false));
+  val schema_patch = pg.plan_schema_update_field_checked(schema_result.unwrap(), "note",
+    pg.change_set(pg.db_text("safe")), uuid_a, uuid_b);
+  if schema_patch.is_err() then panic("schema snapshot planner returned error"); fi
+  if schema_patch.unwrap().is_noop then
+    panic("schema descriptor column snapshots were mutable");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "tampered",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("caller mutation changed schema allowlist");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "another_tamper",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("returned schema array mutated internal store");
+  fi
+  if !pg.plan_schema_update_field_checked(schema_result.unwrap(), "undeclared",
+    pg.change_set(pg.db_text("x")), uuid_a, uuid_b).is_err() then
+    panic("schema planner admitted unknown column");
+  fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("title", "text", false)
+  ]).is_err() then panic("schema without tenant key admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("workspace_id", "text", false)
+  ]).is_err() then panic("schema tenant key type mismatch admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", true),
+    pg.column_spec("workspace_id", "uuid", false)
+  ]).is_err() then panic("nullable id admitted"); fi
+  if !pg.table_descriptor_checked("docs", arr[
+    pg.column_spec("id", "uuid", false),
+    pg.column_spec("workspace_id", "uuid", false),
+    pg.column_spec("title", "text", false),
+    pg.column_spec("title", "text", false)
+  ]).is_err() then panic("duplicate schema field admitted"); fi
+
+  // Multi-column patch: per-field states remain distinct, and two final
+  // UUID binds are appended after all changed field values.
+  val multi = pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("new title' OR true--"))),
+    pg.field_patch("note", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b);
+  if multi.is_err() then panic("valid multi-column patch rejected"); fi
+  if multi.unwrap().is_noop then panic("multi-column SET returned noop"); fi
+  if multi.unwrap().sql !=
+    "UPDATE \"docs\" SET \"title\" = $1::text, \"note\" = $2::text WHERE workspace_id = $3::uuid AND id = $4::uuid" then
+    panic("multi-column canonical SQL mismatch");
+  fi
+  if multi.unwrap().param_count() != 4 then panic("multi-column bind count"); fi
+  if multi.unwrap().param_at(0).unwrap().text_value != "new title' OR true--" then
+    panic("multi-column injection value was not bound");
+  fi
+  if !multi.unwrap().param_at(1).unwrap().is_null then
+    panic("explicit SQL NULL silently became absent");
+  fi
+  if multi.unwrap().param_at(2).unwrap().kind != "uuid" then
+    panic("workspace bind order or type incorrect");
+  fi
+  if multi.unwrap().param_at(3).unwrap().kind != "uuid" then
+    panic("record bind order or type incorrect");
+  fi
+  if !multi.unwrap().param_at(4).is_err() then panic("out-of-range typed bind admitted"); fi
+  val skipped = pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_unchanged(pg.db_text("unchanged")))
+  ], uuid_a, uuid_b);
+  if skipped.is_err() then panic("all-unchanged patch rejected"); fi
+  if !skipped.unwrap().is_noop || skipped.unwrap().param_count() != 0 then
+    panic("all-unchanged patch executed SQL");
+  fi
+  val mixed = pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_set(pg.db_text("changed")))
+  ], uuid_a, uuid_b);
+  if mixed.is_err() then panic("mixed skip/set patch rejected"); fi
+  if mixed.unwrap().sql !=
+    "UPDATE \"docs\" SET \"title\" = $1::text WHERE workspace_id = $2::uuid AND id = $3::uuid" then
+    panic("mixed skip/set placeholder numbering mismatch");
+  fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_not_set()),
+    pg.field_patch("title", pg.change_set(pg.db_text("duplicate")))
+  ], uuid_a, uuid_b).is_err() then panic("duplicate patch field admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("undeclared", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("unrecognized omitted field admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("id", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("omitted primary key allowed in patch"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("workspace_id", pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("tenant key update admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_boolean(true)))
+  ], uuid_a, uuid_b).is_err() then panic("typed patch mismatch admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("nonnull multi-patch SQL NULL admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_unchanged(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("invalid unchanged typed field admitted"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("note", pg.change_checked("not_set", pg.db_boolean(true)).unwrap())
+  ], "bad-tenant", uuid_b).is_err() then panic("invalid tenant admitted for noop"); fi
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("a"))),
+    pg.field_patch("title", pg.change_set(pg.db_text("b")))
+  ], uuid_a, uuid_b).is_err() then panic("duplicate patch update admitted"); fi
+  // Reject >8 requests, including no-op entries: no unbounded SQL planning.
+  if !pg.plan_schema_update_fields_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_not_set()),
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_not_set()),
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_not_set()),
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_not_set()),
+    pg.field_patch("note", pg.change_not_set()),
+    pg.field_patch("title", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("oversized patch list admitted"); fi
+
+  // Explicit projection and bound UUIDs, never wildcard/dynamic SQL.
+  val selected = pg.plan_schema_select_columns_checked(schema_result.unwrap(),
+    arr["id", "title", "note"], uuid_a, uuid_b);
+  if selected.is_err() then panic("declared select projection rejected"); fi
+  if selected.unwrap().sql !=
+    "SELECT \"id\", \"title\", \"note\" FROM \"docs\" WHERE workspace_id = $1::uuid AND id = $2::uuid" then
+    panic("typed projection canonical SQL mismatch");
+  fi
+  if selected.unwrap().param_count() != 2 then panic("typed projection bind count"); fi
+  if selected.unwrap().param_at(0).unwrap().kind != "uuid" then
+    panic("typed projection tenant bind tag");
+  fi
+  if !selected.unwrap().param_at(-1).is_err() then
+    panic("negative projection parameter admitted");
+  fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr[],
+    uuid_a, uuid_b).is_err() then panic("empty projection admitted"); fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["*"],
+    uuid_a, uuid_b).is_err() then panic("wildcard projection admitted"); fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["id", "id"],
+    uuid_a, uuid_b).is_err() then panic("duplicate projection admitted"); fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["secret"],
+    uuid_a, uuid_b).is_err() then panic("undeclared projection admitted"); fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["title;--"],
+    uuid_a, uuid_b).is_err() then panic("SQL projection injection admitted"); fi
+  if !pg.plan_schema_select_columns_checked(schema_result.unwrap(), arr["id"],
+    "malformed-tenant", uuid_b).is_err() then panic("unchecked select tenant admitted"); fi
+
+  // SQL-first typed equality predicate with deterministic bounded ordering.
+  val search = pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id", "title"], "title", pg.db_text("abc' OR true--"), uuid_a,
+    "title", false, 25);
+  if search.is_err() then panic("typed equality search rejected"); fi
+  if search.unwrap().sql !=
+    "SELECT \"id\", \"title\" FROM \"docs\" WHERE workspace_id = $1::uuid AND \"title\" = $2::text ORDER BY \"title\" ASC, \"id\" ASC LIMIT 25" then
+    panic("equality SQL, ordering or limit changed");
+  fi
+  if search.unwrap().param_count() != 2 then panic("search bind count"); fi
+  if search.unwrap().param_at(1).unwrap().text_value != "abc' OR true--" then
+    panic("search SQL injection value not bound");
+  fi
+  val null_search = pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "note", pg.db_null_checked("text").unwrap(), uuid_a, "id",
+    true, 10);
+  if null_search.is_err() then panic("nullable IS NULL search rejected"); fi
+  if null_search.unwrap().sql !=
+    "SELECT \"id\" FROM \"docs\" WHERE workspace_id = $1::uuid AND \"note\" IS NULL ORDER BY \"id\" DESC LIMIT 10" then
+    panic("NULL search must emit IS NULL without second bind");
+  fi
+  if null_search.unwrap().param_count() != 1 then
+    panic("SQL NULL filter unexpectedly bound a second value");
+  fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_null_checked("text").unwrap(), uuid_a, "id",
+    false, 10).is_err() then panic("NULL predicate admitted on nonnullable field"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_boolean(true), uuid_a, "id",
+    false, 10).is_err() then panic("typed predicate mismatch admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "secret", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("undeclared filter field admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "secret",
+    false, 10).is_err() then panic("undeclared sort field admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "title; DROP",
+    false, 10).is_err() then panic("SQL sort injection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 1000).is_err() then panic("unbounded page size admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 0).is_err() then panic("empty page size admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id", "id"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("duplicate result projection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["*"], "title", pg.db_text("x"), uuid_a, "id",
+    false, 10).is_err() then panic("wildcard result projection admitted"); fi
+  if !pg.plan_schema_find_eq_checked(schema_result.unwrap(),
+    arr["id"], "title", pg.db_text("x"), "spoofed-workspace", "id",
+    false, 10).is_err() then panic("unvalidated workspace admitted"); fi
+
+  val inserted = pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("text'; DROP TABLE docs;--"))),
+    pg.field_patch("note", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b);
+  if inserted.is_err() then panic("typed insert rejected"); fi
+  if inserted.unwrap().sql !=
+    "INSERT INTO \"docs\" (\"workspace_id\", \"id\", \"title\", \"note\") VALUES ($1::uuid, $2::uuid, $3::text, $4::text) RETURNING \"id\"" then
+    panic("typed INSERT SQL mismatch");
+  fi
+  if inserted.unwrap().param_count() != 4 then panic("typed INSERT bind count"); fi
+  if inserted.unwrap().param_at(2).unwrap().text_value != "text'; DROP TABLE docs;--" then
+    panic("INSERT value interpolation");
+  fi
+  if !inserted.unwrap().param_at(3).unwrap().is_null then panic("INSERT NULL lost"); fi
+  val omitted_nullable = pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("ok"))),
+    pg.field_patch("note", pg.change_not_set())
+  ], uuid_a, uuid_b);
+  if omitted_nullable.is_err() then panic("optional INSERT NotSet rejected"); fi
+  if omitted_nullable.unwrap().param_count() != 3 then panic("NotSet added INSERT bind"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[], uuid_a, uuid_b).is_err() then
+    panic("missing nonnullable field admitted");
+  fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("NotSet required field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_unchanged(pg.db_text("old")))
+  ], uuid_a, uuid_b).is_err() then panic("Unchanged INSERT field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_null_checked("text").unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("nonnullable INSERT NULL admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_boolean(true)))
+  ], uuid_a, uuid_b).is_err() then panic("wrong INSERT type admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("title", pg.change_set(pg.db_text("x")))
+  ], uuid_a, uuid_b).is_err() then panic("duplicate INSERT column admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("workspace_id", pg.change_set(pg.db_uuid_checked(uuid_a).unwrap()))
+  ], uuid_a, uuid_b).is_err() then panic("insert tenant override admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x"))),
+    pg.field_patch("secret", pg.change_not_set())
+  ], uuid_a, uuid_b).is_err() then panic("unknown INSERT field admitted"); fi
+  if !pg.plan_schema_insert_checked(schema_result.unwrap(), arr[
+    pg.field_patch("title", pg.change_set(pg.db_text("x")))
+  ], "wrong-workspace", uuid_b).is_err() then panic("invalid INSERT workspace admitted"); fi
   stdio.println("Postgres SQL planning contracts passed");
   return;
 }

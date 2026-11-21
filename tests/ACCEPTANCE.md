@@ -276,3 +276,67 @@ service job, or an authorized disposable database is supplied.** Native JDK25
 Oreslang compilation, driver parameter binding, cancellation, independent
 tenant RLS and five-backend parity remain distinct unfulfilled gates. The
 SQL-only job must not be counted as native or production release evidence.
+
+## Future Diesel/SeaORM generated-ORM acceptance suite (NOT EXECUTED)
+
+The [separate compile-fail, ActiveModel, relation and migration matrix](DIESEL_SEAORM_ACCEPTANCE.md) adds static type-safety, SQL/bind, tenant and cancellation gates. These are **specifications only**: the AOT schema descriptors, driver and generated model APIs must first be implemented and then exercised by actual nonzero-step native guest and PostgreSQL runs. Existing planner negative tests are not evidence for these new features.
+
+## Implemented-source typed patch acceptance (native execution pending)
+
+The `tests/plans.ores` positive guest now includes native-source assertions
+for closed `PgType`, UUID lexer, `DbValue` admission, parameter separation,
+explicit SQL NULL, `NotSet` / `Unchanged` no-ops, field type mismatch,
+forged field state, tenant/PK mutation protection, and SQL-identifier
+injection. These **source-authored tests have not executed** against the
+pinned compiler. Positive suite stdout remains
+`Postgres SQL planning contracts passed` only.
+
+The checked single-field patch planner is **data-only**. It is not a live
+PostgreSQL transaction, a complete `Change<T>` generic or a generated
+schema capability. Do not promote it as authorization: the UUID string is not
+verified against authenticated RLS tenant ownership. Real actor-owned
+connection + independent PostgreSQL RLS tests remain P0 blockers.
+
+The new `PgTableDescriptor` positive guest cases also verify that table
+schemas require nonnullable UUID `id` and `workspace_id`, reject duplicate
+columns and unsupported types, prevent mutation of the original/returned
+column arrays, and reject patch fields missing from the declared schema.
+These are **unexecuted guest assertions**, not proof that `PgTableDescriptor`
+is a compiler-generated nominal capability or PostgreSQL tenant authority.
+
+## New multi-field planner and projection checks (not executed in a native guest)
+
+`tests/plans.ores` contains data/SQL goldens and adversarial checks for
+`plan_schema_update_fields_checked` and `plan_schema_select_columns_checked`:
+canonical multi-column SQL with typed placeholder order; bound hostile text;
+explicit nullable NULL versus omitted/unchanged; empty/no-op updates; duplicate
+field admission; schema-only field scope; immutable tenant/id; mismatched
+codec/NULL; 8-field admission boundary; projection wildcard/unknown/duplicate/
+injected columns; tenant UUIDs and parameter bounds. These are **source-authored
+assertions only** until the exact pinned compiler and PostgreSQL driver run.
+
+Additional pending native guest scenarios cover typed equality search:
+declared filter/order/projection checks, typed text/boolean mismatches,
+SQL injection in bind values, IS NULL for nullable columns without a
+second value bind, impossible NULL on nonnullable columns, deterministic
+primary-key ORDER BY tie-breaking, strict finite LIMIT admission and
+rejection of an unvalidated workspace ID. These are source-authored
+assertions, not executed SQL or evidence of RLS.
+
+New unexecuted INSERT guest cases cover required-field admission, NotSet versus SQL NULL, type and duplicate errors, tenant/id spoof prevention at the SQL planner boundary, bind ordering and injection separation. No database integration or authenticated tenant authority exists.
+
+The prepared-DML SQL-only contract has a corresponding host-only fail-closed mock suite (10 scenarios) for opt-in, exact fixture drift before connection, PostgreSQL 17 version admission, malformed output, SQL-process failure and rollback evidence. The host mock is not actual PostgreSQL or native Oreslang evidence. The real SQL contract runs as a separate workflow step with a disposable PostgreSQL 17 service.
+
+### New NotSet sentinel adversarial tests (NOT NATIVE VERIFIED)
+
+The Oreslang guest asserts canonical NotSet admission and rejection of hidden boolean/text/SQL NULL values, retaining valid Set and Unchanged semantics. Host guards verify revalidation in single-field UPDATE, multi-field UPDATE and INSERT. These authored tests are not yet a native guest result.
+
+## Pure Oreslang neutral catalog diff (not yet native-verified)
+
+`tests/schema_diff.ores` asserts schema snapshots, nullable additions,
+required-field backfill blocking, type and nullability drift, potential
+destructive drops/renames, duplicate names, invalid identifiers and kind
+families, bounded safety decisions, array copy isolation, and no claimed
+full-database parity. The TypeSpec/JSON Schema peers remain **not executed**
+in a compiler-backed parity lane. No migration has been produced or applied
+against a live database from this slice.

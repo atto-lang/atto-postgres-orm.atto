@@ -1,0 +1,235 @@
+// Runtime-neutral, data-only catalog diff in pure Oreslang.
+// Neither TypeSpec nor JSON Schema is privileged. Caller must supply a
+// parity-approved IR and a complete introspected DB catalog separately.
+// No sockets, FFI, SQL strings, DDL execution or migration apply here.
+pub define class OrmColumn as
+  pub val string name;
+  pub val string kind;
+  pub val bool nullable;
+  pub constructor(string name, string kind, bool nullable) {
+    self.name = name;
+    self.kind = kind;
+    self.nullable = nullable;
+  }
+end
+
+pub define class OrmTable as
+  pub val string name;
+  val Array<OrmColumn> saved_columns;
+  pub constructor(string name, Array<OrmColumn> columns) {
+    self.name = name;
+    let Array<OrmColumn> copied = arr[];
+    for (val column of columns) { copied.add(column); }
+    self.saved_columns = copied;
+  }
+  pub fnc columns(): Array<OrmColumn> {
+    let Array<OrmColumn> copied = arr[];
+    for (val column of self.saved_columns) { copied.add(column); }
+    return copied;
+  }
+end
+
+pub define class OrmCatalog as
+  // A human-readable label only, never a digest, capability, or authority.
+  pub val string label;
+  val Array<OrmTable> saved_tables;
+  pub constructor(string label, Array<OrmTable> tables) {
+    self.label = label;
+    let Array<OrmTable> copied = arr[];
+    for (val table of tables) { copied.add(table); }
+    self.saved_tables = copied;
+  }
+  pub fnc tables(): Array<OrmTable> {
+    let Array<OrmTable> copied = arr[];
+    for (val table of self.saved_tables) { copied.add(table); }
+    return copied;
+  }
+end
+
+pub define class OrmSchemaChange as
+  pub val string kind;
+  pub val string table_name;
+  pub val string column_name;
+  pub val string reason;
+  pub val bool blocked;
+  pub constructor(string kind, string table_name, string column_name, string reason, bool blocked) {
+    self.kind = kind;
+    self.table_name = table_name;
+    self.column_name = column_name;
+    self.reason = reason;
+    self.blocked = blocked;
+  }
+end
+
+pub define class OrmSchemaProposal as
+  pub val string decision;
+  // This scope is intentionally narrower than a database catalog; all
+  // constraints, defaults, RLS, grants, indexes and triggers are outside it.
+  pub val string scope;
+  val Array<OrmSchemaChange> saved_changes;
+  pub constructor(string decision, Array<OrmSchemaChange> changes) {
+    self.decision = decision;
+    self.scope = "column_shapes_only";
+    let Array<OrmSchemaChange> copied = arr[];
+    for (val change of changes) { copied.add(change); }
+    self.saved_changes = copied;
+  }
+  pub fnc change_count(): int { return self.saved_changes.size; }
+  pub fnc change_at(int index): Result<OrmSchemaChange, string> {
+    if index < 0 || index >= self.saved_changes.size then
+      return Err("schema change index out of bounds");
+    fi
+    return Ok(self.saved_changes.get(index));
+  }
+  pub fnc changes(): Array<OrmSchemaChange> {
+    let Array<OrmSchemaChange> copied = arr[];
+    for (val change of self.saved_changes) { copied.add(change); }
+    return copied;
+  }
+end
+
+define module orm_schema as
+  // Neutral type families. Dialect mapping, width, timezone/precision,
+  // JSON validations and default expressions require reviewed overlays.
+  pub fnc admitted_kind(string kind): bool {
+    return kind == "uuid" || kind == "string" || kind == "boolean"
+      || kind == "int32" || kind == "int64" || kind == "json"
+      || kind == "timestamp" || kind == "bytes";
+  }
+  // Conservative portable SQL identifier admission (ASCII, <=63 bytes).
+  // No operator overloads or implicit coercions. Do not infer SQL authority.
+  pub fnc admitted_name(string name): bool {
+    if name == "" || name.replace_literal("|", "") != name then return false; fi
+    if !name.is_identifier() then return false; fi
+    let string mapped = name;
+    for (val ch of arr["a","b","c","d","e","f","g","h","i","j","k","l","m","n","o","p","q","r","s","t","u","v","w","x","y","z",
+      "A","B","C","D","E","F","G","H","I","J","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y","Z",
+      "0","1","2","3","4","5","6","7","8","9","_"]) {
+      mapped = mapped.replace_literal(ch, "|");
+    }
+    if mapped.replace_literal("|", "") != "" then return false; fi
+    return mapped.split_literal("|").size <= 64;
+  }
+  pub fnc column(string name, string kind, bool nullable): OrmColumn {
+    return new OrmColumn(name, kind, nullable);
+  }
+  pub fnc table_checked(string name, Array<OrmColumn> columns): Result<OrmTable,string> {
+    if !admitted_name(name) then return Err("invalid neutral table name"); fi
+    if columns.size == 0 || columns.size > 64 then
+      return Err("neutral table requires 1..64 columns");
+    fi
+    let Array<string> seen = arr[];
+    for (val column of columns) {
+      if !admitted_name(column.name) || !admitted_kind(column.kind) then
+        return Err("invalid neutral column name or kind");
+      fi
+      for (val previous of seen) {
+        if previous == column.name then return Err("duplicate neutral column"); fi
+      }
+      seen.add(column.name);
+    }
+    return Ok(new OrmTable(name, columns));
+  }
+  pub fnc catalog_checked(string label, Array<OrmTable> tables): Result<OrmCatalog,string> {
+    if label == "" then return Err("empty neutral catalog label"); fi
+    if tables.size > 32 then return Err("too many neutral catalog tables"); fi
+    let Array<string> seen = arr[];
+    for (val table of tables) {
+      if table_checked(table.name, table.columns()).is_err() then
+        return Err("unadmitted table in neutral catalog");
+      fi
+      for (val previous of seen) {
+        if previous == table.name then return Err("duplicate neutral table"); fi
+      }
+      seen.add(table.name);
+    }
+    return Ok(new OrmCatalog(label, tables));
+  }
+  pub fnc diff_checked(OrmCatalog desired, OrmCatalog observed): Result<OrmSchemaProposal,string> {
+    // Public constructors can forge objects. Revalidate both snapshots.
+    if catalog_checked(desired.label, desired.tables()).is_err() then
+      return Err("invalid desired neutral catalog");
+    fi
+    if catalog_checked(observed.label, observed.tables()).is_err() then
+      return Err("invalid observed neutral catalog");
+    fi
+    let Array<OrmSchemaChange> changes = arr[];
+    let bool blocked = false;
+    val current_tables = observed.tables();
+    val target_tables = desired.tables();
+    for (val table of target_tables) {
+      let bool table_found = false;
+      let OrmTable existing = new OrmTable("placeholder", arr[]);
+      for (val current of current_tables) {
+        if current.name == table.name then
+          table_found = true;
+          existing = current;
+        fi
+      }
+      if !table_found then
+        // Even CREATE TABLE requires independent PK, FK, index and RLS review.
+        changes.add(new OrmSchemaChange("propose_create_table",table.name,"",
+          "full table constraints and ownership require DPM review",false));
+      else
+        val existing_columns = existing.columns();
+        for (val field of table.columns()) {
+          let bool found = false;
+          let OrmColumn old = new OrmColumn("placeholder","string",true);
+          for (val current_field of existing_columns) {
+            if current_field.name == field.name then
+              found = true;
+              old = current_field;
+            fi
+          }
+          if !found then
+            if field.nullable then
+              changes.add(new OrmSchemaChange("propose_add_nullable_column",table.name,field.name,
+                "needs reviewed default, constraints and live catalog proof",false));
+            else
+              blocked = true;
+              changes.add(new OrmSchemaChange("block_add_required_column",table.name,field.name,
+                "backfill and non-null admission required",true));
+            fi
+          else
+            if old.kind != field.kind then
+              blocked = true;
+              changes.add(new OrmSchemaChange("block_type_change",table.name,field.name,
+                "cast, data, precision and loss review required",true));
+            fi
+            if old.nullable != field.nullable then
+              blocked = true;
+              changes.add(new OrmSchemaChange("block_nullability_change",table.name,field.name,
+                "nullability requires data and default review",true));
+            fi
+          fi
+        }
+        for (val old_field of existing_columns) {
+          let bool present = false;
+          for (val field of table.columns()) {
+            if field.name == old_field.name then present = true; fi
+          }
+          if !present then
+            blocked = true;
+            changes.add(new OrmSchemaChange("block_drop_or_rename_column",table.name,old_field.name,
+              "possible rename or destructive drop; human identity decision",true));
+          fi
+        }
+      fi
+    }
+    for (val existing of current_tables) {
+      let bool present = false;
+      for (val table of target_tables) {
+        if table.name == existing.name then present = true; fi
+      }
+      if !present then
+        blocked = true;
+        changes.add(new OrmSchemaChange("block_drop_or_rename_table",existing.name,"",
+          "possible rename or destructive drop; human identity decision",true));
+      fi
+    }
+    if blocked then return Ok(new OrmSchemaProposal("stop_for_evaluation",changes)); fi
+    if changes.size > 0 then return Ok(new OrmSchemaProposal("review_required",changes)); fi
+    // This is NOT complete database parity: only column shapes are compared.
+    return Ok(new OrmSchemaProposal("column_shapes_equal_only",changes));
+  }
+end

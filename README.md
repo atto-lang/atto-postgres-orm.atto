@@ -16,6 +16,86 @@ val query = pg.find_in_workspace_checked("workflows", workspace_id, workflow_id)
 // Adapter executes query.sql and binds query.params separately.
 ```
 
+## ORM roadmap: Diesel + SeaORM (design only)
+
+The current module is a checked SQL planner **without a database executor**.
+The planned native ORM combines Diesel's compile-time schema/query checking
+with SeaORM 2.0's explicit `NotSet` / `Unchanged` / `Set` change states,
+async actor-owned transactions and bounded explicit relation loading. Neither
+the generated model API nor the connection/driver API exists yet.
+
+- [Full Diesel + SeaORM adoption design](docs/DIESEL_SEAORM_ADOPTION.md)
+- [Compile-fail, patch, relation and migration acceptance matrix](tests/DIESEL_SEAORM_ACCEPTANCE.md)
+- [Zod/Zorde/Serde/TypeORM/Prisma/Drizzle integration contract](docs/ORM_HARDENING_CONTRACT.md)
+
+## First typed bind / patch slice (native source, unexecuted)
+
+`src/pg.ores` now defines **data-only** `PgType`, `DbValue`,
+`FieldChange` and `TypedPatchPlan` classes, alongside a snapshotting `PgTableDescriptor`, plus checked factories and a
+single-column patch planner. Unlike the earlier `QueryPlan`, patch binds
+carry explicit type tags and an SQL NULL flag. The plan snapshots its
+actor-local bind array; a caller-provided value is never interpolated into
+SQL. `not_set` and `unchanged` return a no-op plan with **zero** binds,
+while `set` writes a separately bound value.
+
+Example (proposed guest syntax; **native compiler not yet executed**):
+
+```ores
+val doc_id = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb";
+val tenant_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+val plan = pg.plan_update_field_checked("docs",
+  pg.column_spec("title", "text", false),
+  pg.change_set(pg.db_text("new title")), tenant_id, doc_id).unwrap();
+// plan.sql has $1::text/$2::uuid/$3::uuid placeholders.
+// plan.param_at(0).unwrap().kind == "text"; never execute via raw SQL.
+```
+
+This slice supports `text`, `uuid` and `boolean` bind tags, with
+canonical UUID syntax checking. Other declared `PgType` variants are not
+yet supported as patch-bind codecs. `PgType`, `DbValue` and `FieldChange`
+have public constructors, so planner admission revalidates their state.
+Prefer `table_descriptor_checked` and `plan_schema_update_field_checked` for local schema allowlists. `PgTableDescriptor` snapshots the column list and revalidates it at use. `ColumnSpec` is **not** a generated or authority-bearing schema descriptor;
+table/column strings are bounded by conservative identifier validation.
+`workspace_id` is only a checked UUID, **not** authenticated tenant
+authority. This is an **SQL planning layer only**, not a driver, PostgreSQL
+execution proof, completed Serde/Zorde adapters or compile-time checked DSL.
+
+## Bounded multi-column patching and explicit projections (native source; guest unverified)
+
+`plan_schema_update_fields_checked` accepts at most **eight** distinct schema
+fields, validates even omitted/unchanged entries, and produces one deterministic
+`UPDATE` with a separately ordered `DbValue` bind sequence. No-op patches
+return an empty SQL plan and zero binds; `Set(None)` produces a typed SQL NULL
+bind for nullable fields, never an omitted assignment. Primary/tenant keys are
+not patchable. Placeholder numbering comes from a fixed allowlist, not input
+text. The only available bind codecs remain text, UUID and boolean.
+
+`plan_schema_select_columns_checked` permits 1–16 explicitly listed declared
+columns and returns a `TypedSelectPlan` with two UUID-tagged, private bind
+values. It rejects `SELECT *`, duplicate/missing columns and untrusted SQL
+fragments. Neither API opens connections or verifies RLS; these are **source
+changes awaiting an actual Oreslang compiler/guest test**.
+
+## Checked equality search (native source; guest unverified)
+
+`plan_schema_find_eq_checked` adds schema-validated equality filters,
+explicit projections, type-matched `DbValue` binds, correct SQL
+`IS NULL` semantics for nullable columns, an explicit order field with
+mandatory primary-key tie-breaking, and fixed page sizes (1, 10, 25,
+50, 100). It rejects raw `ORDER BY` and column SQL fragments, unknown
+fields and invalid tenant UUID strings. This API emits SQL/binds only;
+neither tenant authorization nor a PostgreSQL connection is implemented.
+
+## Strict typed single-row INSERT (native source; execution pending)
+
+`plan_schema_insert_checked` accepts at most 8 named changes plus explicit
+workspace and id UUIDs. Unknown/duplicate names, wrong types, invalid
+SQL NULL for required fields, missing nonnullable values, `Unchanged`
+and caller attempts to override tenant/id are rejected. Nullable fields
+can be omitted; no column defaults are assumed. A `TypedInsertPlan`
+snapshots binds, and the SQL uses explicit placeholders and RETURNING id.
+This remains unexecuted guest source without a PostgreSQL driver.
+
 ## Typed DDL path (draft; compiler execution pending)
 
 For tables with a primary key, prefer `table_typed_pk` over raw column and
@@ -197,3 +277,26 @@ server, native Oreslang compiler or real driver was executed locally**, and a
 zero-step GitHub job cannot count as execution. This SQL-only test does not
 authenticate tenants or establish RLS, migrations, driver correctness, or
 cross-backend parity.
+
+### PostgreSQL 17 prepared DML SQL-only gate
+
+An opt-in disposable test in `tests/pg17-dml-contract.bash` validates two authored Oreslang SQL plan goldens, then uses real PostgreSQL PREPARE/EXECUTE with typed UUID/text binds, explicit SQL NULL, and rollback. `tests/verify-pg17-dml-host.bash` provides **10 host-only admission/mocking cases**, separately from real PostgreSQL. It does **not** run the Oreslang compiler, wire driver, actor transactions or authenticated tenant RLS.
+
+### Canonical NotSet admission (native guest not yet verified)
+
+All checked mutation paths revalidate the state and payload of public FieldChange instances. The temporary non-generic NotSet representation now requires an empty non-NULL text sentinel; explicit typed SQL NULL remains a separate Set state. Regression fixtures reject hidden boolean, hidden text and hidden NULL payloads. Host source guards run separately from unverified native compiler tests.
+
+## Pure Oreslang schema-first and DPM design (source only)
+
+A new runtime-neutral `src/orm_schema.ores` implements defensive catalog
+snapshots and **non-executing column-shape migration proposals** in pure
+Oreslang. It returns review/block decisions rather than SQL or live DDL.
+`tests/schema_diff.ores` contains 47 authored guest assertions awaiting
+compiler-backed execution. `contracts/typespec/document.tsp` and
+`contracts/json-schema/document-row.schema.json` are **independent authored
+contract peers**, not yet proven equivalent by the real TypeSpec compiler.
+`contracts/storage/document.storage.v1.json` separately represents database
+PK/tenant intent; PostgreSQL policy/constraints need full catalog review.
+[Schema-first design and DPM migration protocol](docs/SCHEMA_FIRST_MIGRATIONS.md).
+Production migration planning/application remains solely with DPM; ORM
+startup cannot execute DDL.
