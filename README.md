@@ -43,3 +43,9 @@ This README describes the project's intended role. It does not imply that the li
 AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
 **Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Legacy provenance and transfer verification
+
+The historical predecessor, `ores-truffle-oreslang/postgres-orm.ores`, is archived; the current `atto-lang/atto-postgres-orm.atto` has a separate numeric GitHub repository ID. Preserve working legacy `.ores` fixtures and package/CLI/API aliases until canonical `.atto` replacements are verified. Schema-first ORM, typed CRUD, reviewed migration previews and database contract tests belong here, not production database operator privileges or commercial managed database administration.
+
+[atto-lang](https://github.com/atto-lang) owns language and portable tooling; [atto-co](https://github.com/atto-co) separately governs managed infrastructure, tenant hosting, identity and billing. Any future original-ID transfer or commercial carve-out requires separate owner authorization and independent security review. Inventory exact SHA/tree, numeric ID, access, protections, PRs, releases, packages, runners, secrets, deploy keys, apps, webhooks, Pages, consumers and rollback ownership; verify identity and retest after an authorized transfer. Never mirror private source without authorization. Zero-step jobs are NOT_EXECUTED; host/static checks are not compiled guest evidence, database safety proof or actor parity.
