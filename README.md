@@ -1,53 +1,51 @@
-# postgres-orm.ores
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/atto-lang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
 
-Native Oreslang foundation for a PostgreSQL ORM: code-first DDL composition,
-quoted identifiers, admitted column types, and workspace-scoped parameterized
-query plans. **This first revision does not open database connections or execute
-queries.** A native DB capability/driver remains required.
+# atto-postgres-orm.atto
 
-```ores
-import module pg from './src/pg';
-val sql = pg.table("workflows", arr[
-  pg.column("workspace_id", "uuid", false).unwrap(),
-  pg.column("id", "uuid", false).unwrap(),
-  pg.column("name", "text", false).unwrap()
-], arr["PRIMARY KEY (workspace_id, id)"]);
-val query = pg.find_in_workspace("workflows", workspace_id, workflow_id);
-// Adapter executes query.sql and binds query.params separately.
-```
+PostgreSQL object-relational mapping and database integration implemented in AttoLang.
 
-Constraint strings are explicitly trusted, source-authored SQL. They must never
-receive user input. Identifiers are quoted; types are admitted from a closed list.
-Query values never become SQL text. UUID parameters are cast by PostgreSQL rather
-than interpolated. `Query.params` is an actor-local array; do not share mutable
-plans across execution domains.
+## Naming migration and language authority
 
-The workflow application is the first consumer and owns a compiled Oreslang model,
-real PostgreSQL invariant tests, and checksum/advisory-lock migration tooling:
-[oreslang-n8n-make-zapier-app](https://github.com/ores-truffle-oreslang/oreslang-n8n-make-zapier-app).
+This repository is maintained at [atto-lang/atto-postgres-orm.atto](https://github.com/atto-lang/atto-postgres-orm.atto); use `https://github.com/atto-lang/atto-postgres-orm.atto.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
 
-Run the native contracts with JDK 25 and the clean compiler commit in `SOURCE_REF`:
+## Responsibilities
 
-```sh
-ORESLANG_SOURCE_DIR=../oreslang-source.java ./scripts/ores tests/plans.ores
-```
+PostgreSQL models, query/mapping behavior, and database adapters written in AttoLang.
 
-The compiler must first be built with Maven, including a `target/classpath.txt`:
-`mvn -q -DskipTests package dependency:build-classpath -Dmdep.outputFile=target/classpath.txt`.
-The launcher verifies the revision and rejects tracked compiler modifications.
+## Design guidelines
 
-Next: typed DbValue/DbRow and error surfaces, actor-confined prepared statements,
-transactions and cancellation, bounded row streams, pool ownership, generated
-row codecs, and live PostgreSQL driver conformance. No unsupported driver is
-presented as implemented.
+- Keep application-facing contracts separate from hosted Atto services.
+- Explicitly specify error, cancellation, concurrency, and resource-lifecycle behavior where applicable.
+- Document supported compiler backends, host restrictions, wire formats, and compatibility constraints.
 
-## Repository ownership and migration (2026-11-08)
+## Development and verification
 
-This repo is currently `ores-truffle-oreslang/postgres-orm.ores`. The public language name is **AttoLang**; preserve `.ores` compatibility and old repo/package/CLI IDs until a separate compiler-backed and consumer-reviewed change proves replacement.
+Use the source tree and CI for verified build/test commands. Tests should cover positive cases, invalid inputs, lifecycle behavior, and cross-backend interoperability where relevant.
 
-- **Belongs here:** schema-first AttoLang ORM, typed CRUD, safe migration preview and database contract tests.
-- **Does not belong here:** production database operator privileges and commercial managed DB administration.
-- **Organization model:** [atto-lang](https://github.com/atto-lang) owns portable language libraries, compilers, tools, tests, core/std and examples. [atto-co](https://github.com/atto-co) separately owns managed hosting, tenant/deployment control, identity, billing and SaaS. Existing similarly named `atto-*` repos should be audited for overlap but are not necessarily transfers of this source identity.
-- **Initial proposed move:** this original numeric GitHub repository ID and history into `atto-lang/postgres-orm.ores` retaining the old name. Current migration wave authorizes zero direct moves into `atto-co`. Future product carve-outs require new owner/security approval.
+## Status
 
-**Safe transfer:** announce in [issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26), follow [private migration draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Record exact source SHA/tree, ID, release tags, PRs, packages, dependencies, branch/ruleset protections, target visibility and rights, Actions/runners, App/webhook permissions, secrets, Pages, rollback authority, source/target admins and independent security review. Never mirror private source without explicit authorization. After an approved GitHub ownership transfer verify unchanged ID/tree/history, restore security policy, change consumers separately and run exact-head tests with **nonzero executed steps**. `steps=[]`/`null` is `NOT_EXECUTED`; host or structural tests cannot certify AttoLang guest execution, database safety or actor parity.
+This README describes the project's intended role. It does not imply that the listed APIs or platforms are already implemented or supported.
+
+## Related
+
+- [AttoLang](https://github.com/atto-lang)
+- [Language specification](https://github.com/atto-lang/atto-spec)
+- [Platform conformance](https://github.com/atto-lang/atto-platform-conformance)
+
+## Repository ownership and contribution routing
+
+**Belongs here:** AttoLang PostgreSQL schema/model mappings, query composition, typed result decoding and Postgres driver adapters.
+
+**Belongs elsewhere:** Database-neutral APIs in atto-db; raw SQL runtime host integration in backend repos; hosted Postgres operations in atto-co.
+
+**Security and portability boundary:** Use parameterized queries, transactional error/rollback tests, bounded result handling and schema migration tests; no inline secrets.
+
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
+
+**Acceptance:** name exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
+
+## Legacy migration provenance and gates
+
+The original `ores-truffle-oreslang/postgres-orm.ores` repository is archived; the current repository is `atto-lang/atto-postgres-orm.atto`. This is a distinct repository identity, not proof of an original-ID transfer or equivalent feature support. Preserve historical `.ores` source, CLI, package, ABI and API identifiers until separately verified replacements exist. Schema-first ORM, typed CRUD, safe migration previews and database contract tests belong here; production database operator privileges and hosted DB administration do not.
+
+[atto-lang](https://github.com/atto-lang) owns portable language libraries, compilers, tooling, tests and examples; [atto-co](https://github.com/atto-co) owns hosted deployment, tenant infrastructure, identity and billing. A future original-ID transfer or product carve-out requires separate source/target owner and independent security approval. Inventory exact SHA/tree, numeric ID, visibility, permissions, protections, PRs, releases, packages, dependencies, runners, secrets, applications, webhooks, Pages and rollback owner; verify preservation and rerun exact-head tests after an actual transfer. Never mirror private source without authorization. Zero-step jobs are NOT_EXECUTED; host-only checks do not establish native guest/compiler execution or production safety.
