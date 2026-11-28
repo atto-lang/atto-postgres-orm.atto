@@ -16,6 +16,12 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify original checkout HEAD and clean source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify_ci_source_head_20261106.sh
+      - name: Test checkout-identity negative controls
+        run: python3 -m unittest discover -s tests -p 'test_ci_source_head_20261106.py' -v
       - name: Verify source inventory only (not guest evidence)
         shell: bash
         run: |
@@ -38,6 +44,10 @@ jobs:
         with:
           persist-credentials: false
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Verify original checkout HEAD and clean source
+        env:
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: bash scripts/verify_ci_source_head_20261106.sh
       - name: Exact-head native Oreslang compile and six-case execution
         shell: bash
         env:
